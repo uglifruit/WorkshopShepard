@@ -85,6 +85,16 @@ static constexpr uint32_t kControlMask = 31;
 // "stopped" position that can be found by feel.
 static constexpr int32_t kDeadzone = 50;
 
+// Glide rate curve coefficients - see the derivation in UpdateControl().
+//
+// rate_q32 = |defl| * kRateLinear + (defl^3 >> 30) * kRateCubic
+//
+// The linear term keeps the lower two thirds of the knob useful; the cubic
+// term is what reaches a genuine siren at the stops. Full deflection is
+// ~8 octaves/second, and about 1 oct/s sits at 70% travel.
+static constexpr int32_t kRateLinear = 6;
+static constexpr int32_t kRateCubic = 150;
+
 // Base frequency of layer 0 when the master phase is at zero: A-1, 13.75 Hz.
 // At 12 layers the top sits near 28 kHz, but its window gain is ~0 there so
 // the alias is ~90 dB down. The increment is clamped anyway.
@@ -332,12 +342,35 @@ class ShepardCard : public ComputerCard {
     const int32_t cv = Connected(Input::CV1) ? (int32_t)CVIn1() : 0;
     defl += cv << 3;
 
-    // Rate curve: cubic, so the centre is finely controllable and the extremes
-    // still reach a fast sweep. Full deflection is about 2 octaves/second.
+    // Rate curve: a LINEAR term plus a CUBIC one.
+    //
+    // A pure cube was the first attempt and it was wrong twice over. It was far
+    // too slow - two MulQ15s leave a full-scale cube at 4096 rather than 2^31,
+    // so the `* 12` multiplier delivered 0.55 oct/s at full deflection against
+    // a comment claiming 2. And the shape wasted the knob: at 70% travel it
+    // gave 29 SECONDS per octave, which is not distinguishable from stopped.
+    //
+    // The cubic term alone is what makes the extremes reachable; the linear
+    // term is what stops the first two thirds of the travel being dead. The
+    // measured spread:
+    //
+    //     55% travel   0.12 oct/s    8.6 s per octave   a slow drift
+    //     70%          0.88          1.1 s              clearly moving
+    //     85%          3.1           0.32 s             a fast sweep
+    //    100%          8.0           0.13 s             a siren
+    //
+    // Note the top speed costs precision: pitch drifts 6.4 cents within a
+    // 32-sample control block at 8 oct/s, against 0.4 at the old top speed.
+    // That is smooth staleness rather than a discontinuity - the pitch is
+    // momentarily behind, then catches up - and at a rate this fast the ear
+    // is tracking the sweep, not the tuning. If it ever reads as gritty,
+    // lower kControlMask to 15 rather than capping the speed.
+    const int32_t mag = defl >= 0 ? defl : -defl;
     const int32_t sq = MulQ15(defl, defl);
-    int32_t rate = MulQ15(sq, defl >= 0 ? defl : -defl);
+    const int32_t cube = MulQ15(sq, mag);
+    int32_t rate = mag * kRateLinear + cube * kRateCubic;
     if (defl < 0) rate = -rate;
-    rate_q32_ = rate * 12;
+    rate_q32_ = rate;
 
     shift_up_ = (defl >= 0);
 
@@ -449,13 +482,24 @@ class ShepardCard : public ComputerCard {
     // Main sets the shift, +-12 semitones, with the same deadzone giving a
     // true unity-rate region at noon - a clean unshifted delay, and a
     // necessary reference point.
-    const int32_t semis_q15 = (defl * 12) >> 4;       // +-12 semitones in Q15
-    // rate = 2^(semitones/12), via the same pow2 LUT as the oscillator bank.
-    const int32_t oct_q32 = semis_q15 << 13;
-    const uint32_t frac = (uint32_t)oct_q32;
-    const int32_t p = Pow2Q30(frac);
-    uint32_t rate = (uint32_t)(p >> 14);
-    if (semis_q15 < 0) rate >>= 1;                    // the integer octave
+    // The shift is +-1 octave, and the knob is linear in PITCH across it.
+    //
+    // Deflection is +-16384, and one octave is 2^32 in the pow2 LUT's input,
+    // so the conversion is a shift of 18 - not a Q15 semitone intermediate.
+    // The first version went through `(defl * 12) >> 4` and then `<< 13`,
+    // which does not land on the LUT's Q32 octave scale at all: it spanned
+    // +-0.28 SEMITONES instead of +-12, a factor of 43. The alt-boot would
+    // have sounded like a slightly detuned echo rather than a shimmer, and
+    // nothing in the host tests covered it because spiral_check.py exercises
+    // SpiralDelay::Process directly with a rate handed to it.
+    const int32_t oct_q32 = defl << 18;               // +-1 octave
+
+    // Pow2Q30 takes the FRACTIONAL part and returns 2^f in [1,2) as Q30. For
+    // a negative octave the unsigned wrap gives the right fraction, and the
+    // integer octave below is then one extra right shift.
+    const int32_t p = Pow2Q30((uint32_t)oct_q32);
+    uint32_t rate = (oct_q32 >= 0) ? (uint32_t)(p >> 14)   // 1.0 .. 2.0 in Q16
+                                   : (uint32_t)(p >> 15);  // 0.5 .. 1.0
     if (rate < 16384u) rate = 16384u;
     if (rate > 262144u) rate = 262144u;
     spiral_rate_q16_ = rate;

@@ -21,6 +21,7 @@ instrument rather than a broken calculation:
 Run: python tools/quant_check.py
 """
 
+import math
 import sys
 
 OCT = 1 << 32
@@ -219,6 +220,145 @@ def check_stepping():
     return ok
 
 
+SR = 48000
+DEADZONE_Q15 = 400        # kDeadzone * 8, as applied in UpdateControl
+RATE_LINEAR = 6           # kRateLinear
+RATE_CUBIC = 150          # kRateCubic
+
+
+def mul_q15(w, x):
+    hi = x >> 15
+    lo = x - (hi << 15)
+    return w * hi + ((w * lo) >> 15)
+
+
+def knob_to_rate(pct):
+    """The glide rate curve from UpdateControl(), as octaves per second."""
+    knob = int(pct / 100 * 4095)
+    defl = (knob << 3) - 16384
+    if -DEADZONE_Q15 < defl < DEADZONE_Q15:
+        defl = 0
+    mag = defl if defl >= 0 else -defl
+    sq = mul_q15(defl, defl)
+    cube = mul_q15(sq, mag)
+    rate = mag * RATE_LINEAR + cube * RATE_CUBIC
+    if defl < 0:
+        rate = -rate
+    return rate / (1 << 32) * SR
+
+
+def check_rate_curve():
+    """The glide must reach a genuinely fast sweep at the stops, and the
+    knob's middle travel must not be dead.
+
+    Both halves of that are real defects that shipped in the first version:
+    a pure cubic curve delivered 0.55 oct/s at full deflection (the comment
+    claimed 2), and gave 29 SECONDS per octave at 70% travel - which is not
+    distinguishable from stopped.
+    """
+    print("  glide rate curve:")
+    ok = True
+
+    top = knob_to_rate(100)
+    mid = knob_to_rate(75)
+    low = knob_to_rate(55)
+
+    for pct in (50, 55, 60, 70, 80, 90, 100):
+        r = knob_to_rate(pct)
+        per = (1 / r) if r else 0
+        unit = f"{per:6.2f} s" if per < 60 else f"{per / 60:5.1f} min"
+        print(f"    {pct:3d}% travel: {r:7.3f} oct/s   "
+              f"{unit if r else '  stopped':>10} per octave")
+
+    # Fast enough at the stops to read as a siren rather than a drift.
+    if top < 5.0:
+        ok = False
+        print(f"    TOO SLOW at full deflection: {top:.2f} oct/s (want >= 5)")
+    # Three quarters of the travel must be usefully moving.
+    if mid < 0.5:
+        ok = False
+        print(f"    DEAD MID-TRAVEL: {mid:.2f} oct/s at 75% (want >= 0.5)")
+    # But just off centre must still be a slow drift, not a jump.
+    if low > 0.5:
+        ok = False
+        print(f"    TOO COARSE near centre: {low:.2f} oct/s at 55%")
+
+    # Symmetry: the curve must behave identically either side of noon.
+    for pct in (60, 75, 90, 100):
+        up = knob_to_rate(pct)
+        dn = knob_to_rate(100 - pct)
+        if abs(abs(up) - abs(dn)) > abs(up) * 0.02:
+            ok = False
+            print(f"    ASYMMETRIC at {pct}%: {up:.3f} vs {dn:.3f}")
+
+    # The deadzone must actually stop it.
+    if knob_to_rate(50) != 0.0:
+        ok = False
+        print("    DEADZONE does not reach zero")
+
+    print(f"    full deflection {top:.2f} oct/s, 75% travel {mid:.2f} oct/s, "
+          f"centre stopped  {'ok' if ok else 'FAIL'}")
+    return ok
+
+
+def check_spiral_shift():
+    """SPIRAL's shift must span a full +-12 semitones.
+
+    The first version went through a Q15 semitone intermediate that did not
+    land on the pow2 LUT's Q32 octave scale, and spanned +-0.28 SEMITONES -
+    a factor of 43 short. The alt-boot would have sounded like a slightly
+    detuned echo rather than a shimmer.
+
+    No existing test covered this: spiral_check.py exercises the delay with
+    a rate handed to it, so the knob-to-rate mapping was never checked.
+    """
+    print("  SPIRAL shift range:")
+    pow2 = []
+    for i in range(257):
+        v = (2.0 ** (i / 256.0)) * 1073741824.0
+        pow2.append(2147483647 if v >= 2147483647.0 else int(round(v)))
+
+    def pow2_q30(f):
+        idx = f >> 24
+        frac = (f >> 9) & 0x7FFF
+        return pow2[idx] + mul_q15(frac, pow2[idx + 1] - pow2[idx])
+
+    def knob_to_semitones(pct):
+        knob = int(pct / 100 * 4095)
+        defl = (knob << 3) - 16384
+        if -DEADZONE_Q15 < defl < DEADZONE_Q15:
+            defl = 0
+        oct_q32 = (defl << 18) & 0xFFFFFFFF
+        signed = (defl << 18)
+        p = pow2_q30(oct_q32)
+        rate = (p >> 14) if signed >= 0 else (p >> 15)
+        rate = max(16384, min(262144, rate))
+        return 12 * math.log2(rate / 65536)
+
+    ok = True
+    lo = knob_to_semitones(0)
+    hi = knob_to_semitones(100)
+    mid = knob_to_semitones(50)
+
+    for pct in (0, 25, 50, 75, 100):
+        st = knob_to_semitones(pct)
+        print(f"    {pct:3d}% travel: {st:+7.2f} semitones")
+
+    if abs(lo + 12.0) > 0.5:
+        ok = False
+        print(f"    BOTTOM does not reach -12 st: {lo:+.2f}")
+    if abs(hi - 12.0) > 0.5:
+        ok = False
+        print(f"    TOP does not reach +12 st: {hi:+.2f}")
+    if abs(mid) > 0.01:
+        ok = False
+        print(f"    CENTRE is not unity: {mid:+.4f} st")
+
+    print(f"    spans {lo:+.2f} .. {hi:+.2f} semitones, unity at centre  "
+          f"{'ok' if ok else 'FAIL'}")
+    return ok
+
+
 def check_smooth_passthrough():
     """Smooth mode must not quantise at all."""
     print("  smooth mode is a true pass-through:")
@@ -235,6 +375,8 @@ def main():
     ok &= check_slew()
     ok &= check_stepping()
     ok &= check_smooth_passthrough()
+    ok &= check_rate_curve()
+    ok &= check_spiral_shift()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

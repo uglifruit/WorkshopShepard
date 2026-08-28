@@ -166,7 +166,10 @@ controls:
         name: SPEED
         description: >
           Glide speed and direction. Centre is stationary, with a deadzone so it
-          can be found by feel; anticlockwise descends, clockwise ascends.
+          can be found by feel; anticlockwise descends, clockwise ascends. The
+          range is wide - about 8 seconds per octave just off centre, through a
+          clear glide at three quarters travel, to roughly 8 octaves per second
+          at the stops, which reads as a siren rather than a glissando.
       x:
         name: DENSITY
         description: >

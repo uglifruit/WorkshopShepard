@@ -25,6 +25,11 @@ Turn Main clockwise and the pitch climbs and keeps climbing. Turn it
 anticlockwise and it falls without ever reaching the bottom. Park it at noon
 and the stack sits still, a drone made of octaves.
 
+The speed range is deliberately wide: a barely-perceptible drift of about eight
+seconds per octave just off centre, through a clear glide around three quarters
+of the way, to roughly eight octaves per second at the stops — fast enough to
+read as a siren rather than a glissando.
+
 The card does this two ways at once, and Y crossfades between them:
 
 - **Internal voice** — a bank of 3 to 12 sine oscillators.
@@ -53,7 +58,7 @@ is a button, not a third page.
 
 | Knob | Function |
 |---|---|
-| **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. Summed with CV In 1. |
+| **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. Roughly 8 s per octave just off centre, down to about 0.13 s at the stops. Summed with CV In 1. |
 | **X** | **Density** — 3 to 12 octave layers. |
 | **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
 

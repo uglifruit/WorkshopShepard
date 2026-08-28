@@ -14,10 +14,11 @@ through a fixed spectral envelope, so pitch appears to rise or fall forever.
 pass. Nothing has been flashed or played: every claim about how it sounds is a
 prediction from the algorithm, not an observation.
 
-## The two bugs the tests caught, and why they matter
+## The bugs found before hardware, and why they matter
 
-Both were found on the host, before anything reached hardware. They are the
-argument for keeping this discipline.
+All three were found on the host, before anything reached hardware. They are
+the argument for keeping this discipline — and the third is a reminder that a
+passing test suite is not the same as a checked card.
 
 ### 1. The window lookup was truncated, not interpolated
 
@@ -48,6 +49,39 @@ This is exactly the class of bug that sank a WorkshopSpectral build (512× too
 loud, shipped to hardware, every *modelled* test passing). **Re-run
 `passthru_check.py` after any change to a shift, a gain, or a normalisation.**
 
+### 3. Two knob mappings that never reached their range
+
+Found by playing with the numbers rather than by a test, which is why both now
+have one (`quant_check.py::check_rate_curve` and `::check_spiral_shift`).
+
+**The glide was 15× too slow.** A pure cubic curve, `rate = defl³ * 12`. Two
+`MulQ15`s leave a full-scale cube at 4096 rather than 2³¹, so full deflection
+gave **0.55 oct/s against a comment claiming 2**. The shape was wrong as well
+as the scale: at 70% travel it was 29 *seconds* per octave, indistinguishable
+from stopped, so most of the knob did nothing.
+
+Now `mag * 6 + cube * 150` — a linear term to keep the mid-travel alive and a
+cubic term to reach the stops:
+
+    55% travel   0.12 oct/s     8.6 s per octave   a slow drift
+    70%          0.88           1.1 s              clearly moving
+    85%          3.1            0.32 s             a fast sweep
+   100%          8.0            0.13 s             a siren
+
+**SPIRAL's shift spanned ±0.28 semitones instead of ±12.** A factor of 43. The
+mapping went through a Q15 semitone intermediate (`(defl * 12) >> 4` then
+`<< 13`) that does not land on the pow2 LUT's Q32 octave scale at all. The
+alt-boot would have sounded like a slightly detuned echo rather than a
+shimmer — plausible enough to be blamed on the delay rather than on the knob.
+
+Deflection is ±16384 and one octave is 2³² on that scale, so the conversion is
+simply `defl << 18`.
+
+**Neither was caught by the existing tests**, and the reason is worth
+remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
+handed to it, so the knob-to-rate mapping was never in the loop. A unit test
+that starts *downstream of the control path* cannot see a broken control path.
+
 ## The invariant everything depends on
 
     sum over layers of hann((master_frac + i)/N)  ==  N/2   EXACTLY
@@ -65,9 +99,12 @@ window.** `shepard_check.py` asserts it at every N.
 **3–12 layers, `f_base` = 13.75 Hz (A−1), 192 MHz, control rate = 48 kHz / 32.**
 
 - **192 MHz** — proven on this hardware by grains/51, glitter/53 and SPECTRAL.
-- **Control rate K=32** puts worst-case pitch drift at 1.6 cents within a
-  block, at the fastest musical glide. Inaudible, and it is a *smooth*
-  staleness rather than a discontinuity. Power of two so the counter is a mask.
+- **Control rate K=32** puts worst-case pitch drift at 6.4 cents within a
+  block, at the top glide speed of 8 oct/s. It is a *smooth* staleness — the
+  pitch is momentarily behind and then catches up — not a discontinuity, and at
+  that speed the ear is tracking the sweep rather than the tuning. Power of two
+  so the counter is a mask. If it ever reads as gritty on hardware, drop
+  `kControlMask` to 15 rather than capping the speed.
 - **pow2 LUT at 257 entries** — measured 0.0016 cents. 129 entries gives 0.006,
   65 gives 0.025. The knee is at 256 and the table is 1 KB, so there is no
   reason to go smaller.
