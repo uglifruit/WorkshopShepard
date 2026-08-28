@@ -283,6 +283,11 @@ that is three oscillators, not a defect.
 
 ## Still to do
 
+**`docs/BRINGUP.md` is the ordered first hardware session** — each step depends
+only on what is already confirmed, so a failure localises to what was just
+added. Read CV Out 2 *before* judging the sound: an overrunning ISR produces
+artefacts that look like DSP bugs and chasing those first wastes the session.
+
 - **Flash it and listen.** Nothing here has been heard.
 - Confirm the octave wrap is genuinely inaudible at low layer counts.
 - Check CV Out 2 for the real DSP load. The estimate was ~22% raw / ~45–50%

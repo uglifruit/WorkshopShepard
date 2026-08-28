@@ -228,6 +228,10 @@ Then drag `build/shepard.uf2` onto the Pico.
 **Not yet tested on hardware.** Everything above about how it sounds is a
 prediction from the algorithm and from the host tests, not an observation.
 
+`docs/BRINGUP.md` is an ordered first session with the card — what to check,
+in what order, what each failure would look like, and which test to re-run for
+each. Read CV Out 2 before judging the sound.
+
 ## Credits
 
 Built on Chris Johnson's header-only
