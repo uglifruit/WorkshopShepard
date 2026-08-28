@@ -9,6 +9,15 @@ the algorithm and the host tests.
 
 **Flash `FLASHME/shepard.uf2`** (hold BOOTSEL, drag, it reboots on its own).
 
+That file is refreshed automatically by every build, so it always matches the
+source you have. It did not used to be — it was copied by hand once and went
+stale, holding a build from before two knob mappings were fixed. If you ever
+find the card behaving in a way the documentation flatly contradicts, check
+that first: rebuild, and compare timestamps.
+
+    ninja -C build
+    ls -l FLASHME/shepard.uf2 build/shepard.uf2
+
 ---
 
 ## 0. Before you plug anything in

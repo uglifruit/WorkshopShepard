@@ -240,7 +240,11 @@ cmake -G Ninja -B build -S .
 ninja -C build
 ```
 
-Then drag `build/shepard.uf2` onto the Pico.
+Then hold BOOTSEL and drag `FLASHME/shepard.uf2` onto the Pico. Every build
+refreshes that copy, so it always matches the source you just compiled.
+
+`UF2/` is for released binaries and is populated deliberately, not by the
+build — it is empty until the card has been tested on hardware.
 
 ## Status
 

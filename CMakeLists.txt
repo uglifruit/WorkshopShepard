@@ -69,6 +69,25 @@ target_link_libraries(${CARD_NAME}
 
 pico_add_extra_outputs(${CARD_NAME})
 
+# Copy the .uf2 to FLASHME/ on every successful build.
+#
+# This is not a convenience - it is a correctness fix. FLASHME/ was populated
+# by hand once and then went stale, so it held a build from before two knob
+# mappings were fixed. Flashing it would have given a card whose glide was 15x
+# too slow and whose SPIRAL shift spanned a fortieth of its range, silently
+# contradicting the documentation. A stale artefact is worse than no artefact,
+# because it looks current.
+#
+# FLASHME/*.uf2 is gitignored; the RELEASED binary lives in UF2/ and is
+# committed deliberately, not automatically.
+add_custom_command(TARGET ${CARD_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          ${CMAKE_CURRENT_LIST_DIR}/FLASHME
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE_DIR:${CARD_NAME}>/${CARD_NAME}.uf2
+          ${CMAKE_CURRENT_LIST_DIR}/FLASHME/${CARD_NAME}.uf2
+  COMMENT "Copying ${CARD_NAME}.uf2 to FLASHME/")
+
 # The Computer has no USB serial console in normal use, and enabling stdio over
 # USB pulls in the whole TinyUSB stack.
 pico_enable_stdio_usb(${CARD_NAME} 0)
