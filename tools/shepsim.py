@@ -194,13 +194,18 @@ class Engine:
         self.shift_up = True
 
     def set_rate(self, octaves_per_sec):
-        """Glide rate, as a Q32 master-phase increment per sample."""
+        """Glide rate, as a Q32 master-phase increment PER SAMPLE.
+
+        update_control() multiplies by 32 because it runs once per control
+        block - see the note in main.cpp's UpdateControl(). The firmware got
+        this wrong and glided 32x too slow, in audible steps.
+        """
         self.rate = int(octaves_per_sec * (1 << 32) / SR)
         self.shift_up = octaves_per_sec >= 0
 
     def update_control(self):
         """UpdateControl() from main.cpp - runs every 32 samples."""
-        self.master_free = (self.master_free + self.rate) & 0xFFFFFFFF
+        self.master_free = (self.master_free + self.rate * 32) & 0xFFFFFFFF
 
         if self.scale == 0:
             self.master_out = self.master_free
@@ -259,7 +264,7 @@ class Engine:
                     c = sin_q15((self.mod[i] + 0x40000000) & 0xFFFFFFFF)
                     s = sin_q15(self.mod[i])
                     q = hq if self.shift_up else -hq
-                    shifted = mul_q15(hi >> 9, c) + mul_q15(q >> 9, s)
+                    shifted = (mul_q15(hi >> 5, c) + mul_q15(q >> 5, s)) >> 1
 
                 v = (mul_q15(synth, 32767 - self.source_mix) +
                      mul_q15(shifted, self.source_mix))

@@ -8,11 +8,15 @@ reuse their conventions where they fit.
 **SHEPARD generates Shepard–Risset tones**: octave-spaced components sliding
 through a fixed spectral envelope, so pitch appears to rise or fall forever.
 
-## Current status: v0.1.0, builds clean, NOT yet on hardware
+## Current status: v0.1.1, FLASHED ONCE, three hardware bugs fixed
 
 `build/shepard.uf2` — **1.28% flash, 55.95% RAM**. All five host test suites
-pass. Nothing has been flashed or played: every claim about how it sounds is a
-prediction from the algorithm, not an observation.
+pass.
+
+**It has been on hardware once.** That session found three bugs (below), all in
+the control path, all invisible to a green test suite. They are fixed but the
+fixes are NOT yet confirmed by ear — the card needs reflashing and listening to
+again before anything here is called working.
 
 ## The bugs found before hardware, and why they matter
 
@@ -81,6 +85,63 @@ simply `defl << 18`.
 remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
+
+## Found on HARDWARE, first flash — three bugs the tests all missed
+
+The first real listening session. Every host suite was green at the time, which
+is the point: **all three were in the control path, and every test started
+downstream of it.**
+
+### 1. The glide ran 32× too slow, in audible steps
+
+Reported as *"the pitch climbs, then PLATEAUS, then there's a click and it
+resets"*, at every layer count.
+
+`rate_q32_` is a PER-SAMPLE increment, but `master_free_q32_ += rate_q32_` sits
+in `UpdateControl()`, which runs once per 32 samples. So the glide was 32× slow
+**and** the master moved in 32-sample steps — the plateau is the phase barely
+advancing, the click is the accumulated jump arriving at once.
+
+It hid from everything because the window AND the layer frequencies both derive
+from the master, so they stayed perfectly consistent with each other. The
+illusion still half-worked; only the *rate* was wrong, and nothing measured
+absolute rate end to end. `quant_check.py::check_master_advance` now does, and
+also asserts the per-block pitch step stays under a couple of cents.
+
+Fix: `master_free_q32_ += rate_q32_ * (kControlMask + 1)`.
+
+### 2. Switching to page 2 silenced the card
+
+`level_arrival_` was captured from `stored_[1][2]`, which on the first visit
+still holds the constructor default (32767) rather than where Y is pointing.
+The next knob read then looked like a huge movement, `level_live_` latched
+immediately, and the level jumped to Y's physical position — silence with Y
+anticlockwise.
+
+The "hold until moved" protection did exactly the opposite of its purpose. Fix:
+capture from `KnobVal(Knob::Y)`, the live ADC reading, which is correct on the
+first visit as well as later ones.
+
+### 3. The live-audio blend was 24 dB too quiet
+
+The input is `<< 9` for the Hilbert filter's precision, and the modulator then
+did `>> 9` — exactly undoing it. So the live path entered the crossfade at its
+raw ±2048 while `SinQ15` delivered ±32767. Measured: live-only rms 42 against
+the synth's 443.
+
+`passthru_check.py` never caught it because it only ever exercised the synth
+path. Fix: `>> 5`, which lands ±2^20 at full Q15, plus `>> 1` for the quadrature
+sum. Live-only is now rms 336 against 443 — within 2.4 dB.
+
+### The lesson, which is the same one three times
+
+A unit test that begins *downstream of the control path* cannot see a broken
+control path. `spiral_check.py` takes a rate as an argument; `passthru_check.py`
+renders the synth bank directly; `shepard_check.py` sets the master phase
+itself. Every one of them was green while the knobs did the wrong thing.
+
+**When adding a test, ask what it takes as given.** That is where the next bug
+will be.
 
 ## The invariant everything depends on
 

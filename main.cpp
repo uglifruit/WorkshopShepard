@@ -270,7 +270,23 @@ class ShepardCard : public ComputerCard {
         const int32_t s = SinQ15(mod_q32_[i]);                  // sin
         // Sign of the Q term sets the direction. One flip, not two code paths.
         const int32_t q = shift_up_ ? hq : -hq;
-        shifted = (MulQ15(hi >> 9, c) + MulQ15(q >> 9, s));
+
+        // Scale the analytic pair to FULL Q15 before modulating, so the live
+        // path meets the synth path at the same level in the crossfade below.
+        //
+        // The input is left-shifted by 9 for the Hilbert filter's precision
+        // (its Q30 coefficients need the headroom). Shifting by the same 9
+        // here would exactly undo that, leaving the live signal at its raw
+        // +-2048 while SinQ15 delivers +-32767 - a 24 dB mismatch, so Y read
+        // as a fade to almost nothing rather than as a crossfade.
+        //
+        // Observed on hardware as "feeding audio in and changing blend gives
+        // a very quiet signal". >> 5 instead: +-2^20 becomes +-32768, which
+        // is full Q15 and matches the oscillator.
+        //
+        // The two quadrature terms sum in power, not amplitude, so the pair
+        // peaks at ~1.41x a single term; the >> 1 keeps that inside Q15.
+        shifted = (MulQ15(hi >> 5, c) + MulQ15(q >> 5, s)) >> 1;
       }
 
       // Crossfade the two sources, then apply this layer's window gain.
@@ -385,7 +401,19 @@ class ShepardCard : public ComputerCard {
     // target. Snapping directly would make all N oscillators jump together,
     // which is audible as a thump even though a pitch step is not itself a
     // click.
-    master_free_q32_ += (uint32_t)rate_q32_;
+    //
+    // MULTIPLIED BY THE CONTROL DIVIDER. rate_q32_ is a PER-SAMPLE increment,
+    // but this runs once per control block, so advancing by it directly made
+    // the glide 32x too slow - and worse, it made the pitch move in 32-sample
+    // STEPS large enough to hear. On hardware that was "the pitch climbs, then
+    // plateaus, then clicks and resets": the plateau is the master barely
+    // moving, and the click is the accumulated error arriving all at once.
+    //
+    // The window and the layer frequencies both derive from master, so they
+    // stayed consistent with each other - which is why the illusion still
+    // half-worked and the fault read as a wrap artefact rather than as a
+    // broken rate.
+    master_free_q32_ += (uint32_t)rate_q32_ * (kControlMask + 1u);
 
     // Pulse In 1 advances one degree in stepped modes. Counted, not flagged -
     // a bool set by the ISR and cleared elsewhere loses any trigger arriving
@@ -565,7 +593,21 @@ class ShepardCard : public ComputerCard {
       if (pending_page_ != page_) {
         page_ = pending_page_;
         if (page_ == 1) {
-          level_arrival_ = stored_[1][2];
+          // Capture the arrival position from the KNOB, not from stored_.
+          //
+          // stored_[1][2] holds whatever page 2 last wrote - on the first
+          // visit that is the constructor default (32767), which has no
+          // relationship to where Y is actually pointing. Capturing that made
+          // the very first knob read look like a large movement, so
+          // level_live_ latched true immediately and the level jumped to Y's
+          // physical position. With Y anticlockwise that is SILENCE, and the
+          // whole "hold until moved" protection did precisely the opposite of
+          // its purpose.
+          //
+          // Observed on hardware as "switch upwards and everything goes
+          // silent". KnobVal is the live ADC reading, so this is correct on
+          // the first visit as well as on later ones.
+          level_arrival_ = KnobVal(Knob::Y) << 3;
           level_live_ = false;
         }
       }

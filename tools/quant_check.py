@@ -301,6 +301,68 @@ def check_rate_curve():
     return ok
 
 
+CONTROL_DIV = 32          # kControlMask + 1
+
+
+def check_master_advance():
+    """The master phase must actually advance at the requested rate.
+
+    This is the bug that reached hardware and read as "the pitch climbs, then
+    plateaus, then clicks and resets".
+
+    rate_q32 is a PER-SAMPLE increment, but the master phase is advanced in
+    UpdateControl(), which runs once per 32 samples. Adding it directly made
+    the glide 32x too slow AND made the pitch move in 32-sample steps large
+    enough to hear - the plateau being the master barely moving, the click
+    being the accumulated jump.
+
+    It hid from every other test because the window and the layer frequencies
+    both derive from the master, so they stayed consistent with each other.
+    The illusion still half-worked; it was the RATE that was wrong, and
+    nothing was checking absolute rate end to end.
+
+    So: measure the octaves actually covered per second, wraps included, and
+    require it to match the curve.
+    """
+    print("  master phase advances at the requested rate:")
+    ok = True
+    SECS = 2
+
+    for pct in (55, 70, 85, 100):
+        want = knob_to_rate(pct)
+        rate_q32 = int(want * (1 << 32) / SR)
+
+        master = 0
+        prev = 0
+        wraps = 0
+        for k in range(SR * SECS):
+            if (k & (CONTROL_DIV - 1)) == 0:
+                master = (master + rate_q32 * CONTROL_DIV) & 0xFFFFFFFF
+                if master < prev:
+                    wraps += 1
+                prev = master
+        got = (wraps + master / (1 << 32)) / SECS
+
+        err = abs(got - want) / want * 100 if want else 0
+        status = "ok" if err < 1.0 else f"FAIL ({got:.3f} vs {want:.3f})"
+        if err >= 1.0:
+            ok = False
+        print(f"    {pct:3d}% travel: want {want:6.3f} oct/s, "
+              f"got {got:6.3f}  {status}")
+
+    # And the per-block pitch step must stay small enough not to read as
+    # stepping through most of the travel.
+    for pct, limit in ((70, 2.0), (85, 4.0)):
+        r = knob_to_rate(pct)
+        cents = r * CONTROL_DIV / SR * 1200
+        status = "ok" if cents < limit else f"FAIL (>{limit})"
+        if cents >= limit:
+            ok = False
+        print(f"    {pct:3d}% travel: {cents:.2f} cents per control block  "
+              f"{status}")
+    return ok
+
+
 def check_spiral_shift():
     """SPIRAL's shift must span a full +-12 semitones.
 
@@ -376,6 +438,7 @@ def main():
     ok &= check_stepping()
     ok &= check_smooth_passthrough()
     ok &= check_rate_curve()
+    ok &= check_master_advance()
     ok &= check_spiral_shift()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
