@@ -1,6 +1,6 @@
 draft: true
 Name: SHEPARD
-Description: An infinite glissando — Shepard-Risset tones that rise or fall forever, for the internal voice or for live audio through a Hilbert frequency shifter
+Description: "DRAFT (untested on hardware): an infinite glissando — Shepard-Risset tones that rise or fall forever, for the internal voice or for live audio through a Hilbert frequency shifter"
 Language: C++ (ComputerCard)
 Creator: Andy Jenkinson (uglifruit)
 Version: "0.1.0"
@@ -31,6 +31,12 @@ tags:
   - delay
 
 summary: |
+  <b>DRAFT - NOT YET TESTED ON HARDWARE.</b> This card has never been flashed or
+  played. Everything below is a prediction from the algorithm and from the host
+  test suite, not an observation. There is no released binary, and the described
+  behaviour should be treated as intent rather than as fact until someone has
+  heard it.<br><br>
+
   SHEPARD generates Shepard-Risset tones: the auditory illusion of a pitch that
   glides forever upward or downward without ever leaving its range. Octave-spaced
   components slide together through a fixed spectral envelope, each fading in at
@@ -86,7 +92,16 @@ summary: |
   quantisation across the octave wrap, delay loop stability run at DC, and
   end-to-end gain. Two of those tests caught real bugs during development: a
   truncated window lookup that rippled at odd layer counts only, and an output
-  stage running 4dB too hot. Flash 1.3%, RAM 56%.
+  stage running 4dB too hot. A renderer (tools/shepsim.py) runs the same integer
+  engine to WAV so the card can be heard before flashing, and checks the octave
+  wrap for a discontinuity — calibrating itself against a deliberately broken
+  build on each run, so a detector that cannot fire is never mistaken for a
+  pass.<br><br>
+
+  Flash 1.3%, RAM 56%, both from the linker. The DSP load is NOT yet measured:
+  the estimate is roughly 45-50% of the per-sample budget, but SPECTRAL was
+  modelled at 51% and ran at 231% on real hardware, so CV Out 2 is the authority
+  and nobody has read it. See docs/BRINGUP.md.
 
 panel:
   inputs:

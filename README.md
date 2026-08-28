@@ -3,6 +3,16 @@
 An infinite glissando for the Music Thing Modular Workshop System Computer —
 a pitch that rises or falls forever without ever leaving its range.
 
+> ## ⚠️ DRAFT — never tested on hardware
+>
+> This card has not been flashed or played. It compiles clean, and its DSP is
+> verified by a host test suite, but **every description of how it sounds is a
+> prediction from the algorithm — not an observation.**
+>
+> There is no released binary. The DSP load is unmeasured. Treat everything
+> below as intent rather than as fact, and see [docs/BRINGUP.md](docs/BRINGUP.md)
+> for the ordered first hardware session.
+
 ## What it does
 
 A Shepard–Risset tone is a stack of components spaced exactly one octave apart,
@@ -111,6 +121,10 @@ voltmeter while knobs are moved. Full scale means the ISR is exactly filling
 its budget.
 
 This is the authority on whether the card fits — not any figure in this README.
+
+**It has not been read yet.** The estimate is roughly 45–50% of budget, but the
+sibling card SPECTRAL was modelled at 51% and measured 231% on real hardware.
+Until a voltmeter says otherwise, the cost of this card is unknown.
 
 ## SPIRAL mode (alt-boot)
 
