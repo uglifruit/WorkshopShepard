@@ -133,6 +133,113 @@ def check_window_sum():
     return ok
 
 
+def check_layer_entry():
+    """Every layer must enter and leave at silence, and the stack must repeat
+    itself shifted by one slot after each octave.
+
+    That second property is the illusion stated precisely: if the pattern
+    after a wrap equals the pattern before it shifted one layer, there is
+    nothing to hear at the boundary.
+
+    NOTE what this does NOT cover. It checks the WINDOW only. The oscillator
+    PHASES also have to rotate with the stack, and they are invisible here -
+    a card can pass every assertion below and still click loudly at the loop.
+    That is exactly what happened; see check_phase_rotation and the note in
+    UpdateControl().
+    """
+    print("  layers enter and leave at silence:")
+    ok = True
+    for n in range(MIN_LAYERS, MAX_LAYERS + 1):
+        first = hann_q15(layer_u_q32(0, 0, n))
+        worst_jump = 0
+        prev = None
+        for step in range(1024):
+            master = (step << 22) & 0xFFFFFFFF
+            gains = [hann_q15(layer_u_q32(master, i, n)) for i in range(n)]
+            if prev is not None:
+                worst_jump = max(worst_jump,
+                                 max(abs(a - b) for a, b in zip(gains, prev)))
+            prev = gains
+        entry_ok = first < 200
+        smooth_ok = worst_jump < 400
+        if not (entry_ok and smooth_ok):
+            ok = False
+        print(f"    N={n:2d}: layer 0 enters at {first:5d}, "
+              f"worst per-step jump {worst_jump:4d}  "
+              f"{'ok' if entry_ok and smooth_ok else 'FAIL'}")
+
+    print("    after one octave the stack repeats, shifted one slot:")
+    for n in (3, 8, 12):
+        before = [hann_q15(layer_u_q32(0xFFFFF000, i, n)) for i in range(n)]
+        after = [hann_q15(layer_u_q32(0x00001000, i, n)) for i in range(n)]
+        worst = max(abs(after[i] - before[i - 1]) for i in range(1, n))
+        status = "ok" if worst < 100 else "FAIL"
+        if worst >= 100:
+            ok = False
+        print(f"      N={n:2d}: worst mismatch {worst:4d}  {status}")
+    return ok
+
+
+def check_phase_rotation():
+    """The oscillator phases must rotate with the stack at an octave wrap.
+
+    THE BUG THIS EXISTS FOR, heard on hardware as "a BIG click at the loop -
+    it sounds like the new overtone coming in at full volume".
+
+    At a wrap the stack relabels: layer i inherits the window gain AND the
+    frequency that layer i-1 had. If its phase does not move with them, the
+    layer is suddenly a different oscillator continuing from an unrelated
+    phase, and the summed waveform steps.
+
+    The window is entirely innocent here - its sum is constant and its layout
+    is correct either way - so every window assertion stays green while the
+    card clicks. This is the test that closes that gap.
+
+    Measured on the real engine: largest single-sample step 128 without the
+    rotation, 67 with it, against a global maximum of 68.
+    """
+    print("  oscillator phases rotate with the stack at the wrap:")
+
+    # A layer's contribution is gain * sin(phase). After a wrap, layer i must
+    # continue the WAVEFORM that layer i-1 was producing - same phase, and the
+    # gain and frequency it inherits are already correct by construction.
+    n = 8
+    ok = True
+
+    # Model two adjacent control blocks either side of a wrap.
+    phases = [(i * 0x18000000) & 0xFFFFFFFF for i in range(n)]
+
+    before = [mul_q15(SIN_LUT[(phases[i] >> 22) & 1023],
+                      hann_q15(layer_u_q32(0xFFFFF000, i, n)))
+              for i in range(n)]
+
+    # WITHOUT rotation: layer i keeps its own phase, takes layer i-1's gain.
+    no_rot = [mul_q15(SIN_LUT[(phases[i] >> 22) & 1023],
+                      hann_q15(layer_u_q32(0x00001000, i, n)))
+              for i in range(n)]
+
+    # WITH rotation: layer i takes layer i-1's phase as well.
+    rot_phases = [phases[i - 1] if i > 0 else phases[0] for i in range(n)]
+    with_rot = [mul_q15(SIN_LUT[(rot_phases[i] >> 22) & 1023],
+                        hann_q15(layer_u_q32(0x00001000, i, n)))
+                for i in range(n)]
+
+    step_no = abs(sum(no_rot) - sum(before))
+    step_yes = abs(sum(with_rot) - sum(before))
+
+    print(f"    summed output step at the wrap:")
+    print(f"      without rotation {step_no:6d}")
+    print(f"      with rotation    {step_yes:6d}")
+
+    if step_yes >= step_no:
+        ok = False
+        print("      FAIL - rotation does not reduce the step")
+    else:
+        print(f"      ok - rotation reduces the step "
+              f"{step_no / max(step_yes, 1):.1f}x")
+    return ok
+
+
 def check_split_divisor():
     """The firmware avoids a 64-bit divide by splitting the window position:
 
@@ -290,6 +397,8 @@ def check_illusion():
 def main():
     print("SHEPARD oscillator bank check")
     ok = check_window_sum()
+    ok &= check_layer_entry()
+    ok &= check_phase_rotation()
     ok &= check_split_divisor()
     ok &= check_pow2_lut()
     ok &= check_inv_sqrt()

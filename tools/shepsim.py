@@ -189,6 +189,8 @@ class Engine:
 
         self.master_free = 0
         self.master_out = 0
+        self.win_phase = 0
+        self.prev_master = None
         self.hilbert = Hilbert()
         self.rate = 0
         self.shift_up = True
@@ -222,9 +224,22 @@ class Engine:
         shift_base = abs(self.rate) >> 6
 
         n = self.layers
-        md = self.master_out // n
         od = (0xFFFFFFFF // n) + 1
         wd = ((self.width << 17) // n) & 0xFFFFFFFF
+        md = self.master_out // n
+
+        # The octave wrap RELABELS which layer holds which gain: after the
+        # wrap layer i sits where layer i-1 was. The oscillator phases must
+        # rotate the same way, or a layer keeps its old phase while taking a
+        # new gain and frequency - which is the big click.
+        if self.prev_master is not None:
+            if self.prev_master > 0xC0000000 and self.master_out < 0x40000000:
+                for i in range(len(self.osc) - 1, 0, -1):
+                    self.osc[i] = self.osc[i - 1]
+            elif self.prev_master < 0x40000000 and self.master_out > 0xC0000000:
+                for i in range(len(self.osc) - 1):
+                    self.osc[i] = self.osc[i + 1]
+        self.prev_master = self.master_out
 
         for i in range(n):
             inc = (inc0 << i) & 0xFFFFFFFF

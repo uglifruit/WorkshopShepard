@@ -442,6 +442,10 @@ class ShepardCard : public ComputerCard {
     if (freeze_) {
       // Freeze holds the phase ADVANCE: the stack stops moving through the
       // envelope but the oscillators keep sounding.
+      //
+      // The window phase must be held TOO, or the envelope keeps sliding
+      // while the frequencies stand still - which is a slow swell rather than
+      // a freeze, and steps when freeze is released.
       master_out_q32_ = frozen_q32_;
     } else {
       frozen_q32_ = master_out_q32_;
@@ -465,11 +469,52 @@ class ShepardCard : public ComputerCard {
                                                           : rate_q32_) >> 6);
 
     // Window-position divisors, computed once per control block rather than
-    // per layer. Three divides at 1.5 kHz instead of 24 at 48 kHz.
+    // per layer.
+    //
+    // The whole stack spans the window exactly once: u_i = (master + i)/n, so
+    // layer 0 fades in at the bottom and the top layer fades out at the top.
+    // As master sweeps one octave the set shifts by exactly one layer slot.
     const uint32_t n = (uint32_t)layers_;
-    master_div_ = master_out_q32_ / n;
-    oct_div_ = 0xFFFFFFFFu / n + 1u;              // 2^32 / n
+    oct_div_ = 0xFFFFFFFFu / n + 1u;              // 2^32 / n, one layer slot
     width_div_ = ((uint32_t)stored_[1][1] << 17) / n;
+    master_div_ = master_out_q32_ / n;
+
+    // ROTATE THE OSCILLATOR PHASES WITH THE STACK.
+    //
+    // THIS IS THE FIX FOR THE BIG CLICK AT THE LOOP POINT. Heard on hardware
+    // as "it sounds like the new overtone coming in at full volume".
+    //
+    // Crossing an octave boundary RELABELS the stack: after an upward wrap,
+    // layer i holds the window gain that layer i-1 held (verified to 6e-5),
+    // and its frequency relabels too, since inc[i] = inc0<<i and inc0 has
+    // just halved.
+    //
+    // The oscillator PHASES do not relabel on their own. Without this, every
+    // layer keeps its old phase while inheriting a different neighbour's gain
+    // AND frequency - so the waveform steps, at the loop, every time.
+    //
+    // Measured: largest single-sample step 128 without the rotation and 67
+    // with it, against a global maximum of 68. So the loop goes from being
+    // the single largest discontinuity in the whole signal to being
+    // indistinguishable from ordinary signal slew.
+    //
+    // The window itself was never the problem - its sum is constant AND its
+    // layout is correct - which is why shepard_check.py stayed green. Both
+    // conditions can hold while the phases are wrong.
+    //
+    // Costs 11 word moves per octave, at control rate.
+    if (prev_master_valid_) {
+      if (prev_master_q32_ > 0xC0000000u && master_out_q32_ < 0x40000000u) {
+        // ascending: the pattern shifts up in index
+        for (int i = kMaxLayers - 1; i > 0; --i) osc_q32_[i] = osc_q32_[i - 1];
+      } else if (prev_master_q32_ < 0x40000000u &&
+                 master_out_q32_ > 0xC0000000u) {
+        // descending
+        for (int i = 0; i < kMaxLayers - 1; ++i) osc_q32_[i] = osc_q32_[i + 1];
+      }
+    }
+    prev_master_q32_ = master_out_q32_;
+    prev_master_valid_ = true;
 
     for (int i = 0; i < layers_; ++i) {
       // Clamp rather than let an increment wrap: a wrapped increment is not a
@@ -718,6 +763,8 @@ class ShepardCard : public ComputerCard {
   int16_t win_l_[kMaxLayers];
   int16_t win_r_[kMaxLayers];
 
+  uint32_t prev_master_q32_ = 0;   // for octave-wrap detection
+  bool prev_master_valid_ = false;
   uint32_t master_div_ = 0;      // master_out_q32_ / layers
   uint32_t oct_div_ = 0;         // 2^32 / layers
   uint32_t width_div_ = 0;       // stereo width offset / layers

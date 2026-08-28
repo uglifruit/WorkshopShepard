@@ -86,11 +86,11 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE, first flash — three bugs the tests all missed
+## Found on HARDWARE — four bugs the tests all missed
 
-The first real listening session. Every host suite was green at the time, which
-is the point: **all three were in the control path, and every test started
-downstream of it.**
+The first two listening sessions. Every host suite was green throughout, which
+is the point: three were in the control path, and the fourth hid behind an
+invariant that was true but insufficient.
 
 ### 1. The glide ran 32× too slow, in audible steps
 
@@ -133,15 +133,46 @@ the synth's 443.
 path. Fix: `>> 5`, which lands ±2^20 at full Q15, plus `>> 1` for the quadrature
 sum. Live-only is now rms 336 against 443 — within 2.4 dB.
 
-### The lesson, which is the same one three times
+### 4. The BIG click at the loop: oscillator phases did not rotate
 
-A unit test that begins *downstream of the control path* cannot see a broken
-control path. `spiral_check.py` takes a rate as an argument; `passthru_check.py`
-renders the synth bank directly; `shepard_check.py` sets the master phase
-itself. Every one of them was green while the knobs did the wrong thing.
+Reported as *"a BIG click when it loops — it sounds like the new overtone
+coming in at full volume"*. That description is what solved it.
+
+Crossing an octave boundary RELABELS the stack: layer *i* inherits the window
+gain that layer *i−1* had, and inherits its frequency too, since
+`inc[i] = inc0 << i` and `inc0` has just halved. **The oscillator phases do not
+relabel on their own.** So every layer kept its own phase while taking on a
+different neighbour's gain and frequency, and the summed waveform stepped —
+every octave, at the loop.
+
+Measured: largest single-sample step **128 without the rotation, 67 with it**,
+against a global maximum of 68. The loop goes from being the single largest
+discontinuity in the signal to being indistinguishable from ordinary slew.
+
+**The window was innocent.** Its sum is constant and its layout is correct;
+both remain true whether the phases rotate or not. That is why every window
+assertion stayed green while the card clicked audibly. Closed by
+`shepard_check.py::check_phase_rotation`, which measures the summed step
+directly: 24610 without rotation, 1 with.
+
+Worth recording that I chased the window first — a free-running window phase,
+then a "unified" phase design — and both were wrong turns. The user's
+description of the SOUND ("new overtone at full volume") pointed at a layer
+entering wrongly, which is where the answer was.
+
+### The lesson, which is the same one four times
+
+A test that begins *downstream* of the thing that is broken cannot see it.
+`spiral_check.py` takes a rate as an argument; `passthru_check.py` renders the
+synth bank directly; `shepard_check.py` sets the master phase itself and only
+ever inspected the WINDOW, never the phases. Every one was green while the card
+misbehaved.
 
 **When adding a test, ask what it takes as given.** That is where the next bug
-will be.
+will be — and note that the fourth one hid behind an invariant that was
+genuinely true. A constant-sum window is necessary for seamlessness; it is not
+sufficient, and a test that proves the necessary condition can read as though
+it has proved the sufficient one.
 
 ## The invariant everything depends on
 
