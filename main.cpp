@@ -87,13 +87,33 @@ static constexpr int32_t kDeadzone = 50;
 
 // Glide rate curve coefficients - see the derivation in UpdateControl().
 //
-// rate_q32 = |defl| * kRateLinear + (defl^3 >> 30) * kRateCubic
+//     rate_q32 = |defl| * kRateLinear + defl^7 * kRateHigh
 //
-// The linear term keeps the lower two thirds of the knob useful; the cubic
-// term is what reaches a genuine siren at the stops. Full deflection is
-// ~8 octaves/second, and about 1 oct/s sits at 70% travel.
-static constexpr int32_t kRateLinear = 6;
-static constexpr int32_t kRateCubic = 150;
+// A SEVENTH power, not a cube, and the reason is perceptual rather than
+// numerical.
+//
+// The Shepard illusion only works while the listener cannot track the octave
+// cycle. Above about 1 octave/second the cycle repeats once a second or
+// faster and the ear stops hearing "endlessly rising" and starts hearing "a
+// climbing line, repeated" - because that is what it is. Every Shepard
+// implementation has this limit; Risset's originals run at roughly 0.1-0.3
+// oct/s.
+//
+// An earlier cubic curve put 1 oct/s at 70% of travel, so HALF the knob was
+// past the point where the effect survives. Heard on hardware as "at faster
+// than a period of about 1 second I hear repeated climbing lines" - which was
+// the illusion breaking down exactly as it must, not a fault.
+//
+// The 7th power keeps the knee much later: 85% of travel now stays inside the
+// illusion, with the top 15% running out to a deliberate siren.
+//
+//     52%   0.02 oct/s    46 s per octave
+//     70%   0.22           4.6 s
+//     85%   0.97           1.0 s     <- the perceptual edge
+//     92%   2.6            0.38 s    siren
+//    100%   7.9            0.13 s    siren
+static constexpr int32_t kRateLinear = 3;
+static constexpr int32_t kRateHigh = 2600;
 
 // Base frequency of layer 0 when the master phase is at zero: A-1, 13.75 Hz.
 // At 12 layers the top sits near 28 kHz, but its window gain is ~0 there so
@@ -254,7 +274,7 @@ class ShepardCard : public ComputerCard {
       hilbert_.Process(in, &hi, &hq);
     }
 
-    for (int i = 0; i < layers_; ++i) {
+    for (int i = 0; i < active_layers_; ++i) {
       // --- internal voice ---
       int32_t synth = 0;
       if (source_mix_ < 32767) {
@@ -308,7 +328,9 @@ class ShepardCard : public ComputerCard {
     // If any gain in this path changes, re-run that test. The sibling card
     // shipped a 512x scaling error to hardware that every MODELLED test
     // passed - only running the real arithmetic catches it.
-    const int32_t g = kInvSqrtN[layers_];
+    // 1/sqrt(N) must follow the FRACTIONAL count too, or the level steps at
+    // each integer boundary even though the layers no longer do.
+    const int32_t g = inv_sqrt_n_;
     *out_l = MulQ15(acc_l, g) >> 5;
     *out_r = MulQ15(acc_r, g) >> 5;
   }
@@ -332,15 +354,34 @@ class ShepardCard : public ComputerCard {
 
   // --- control rate --------------------------------------------------------
   void __not_in_flash_func(UpdateControl)() {
-    // Layer count from X, 3..12.
+    // Layer count from X, 3..12, with a FRACTIONAL part so the next
+    // oscillator FADES IN rather than appearing at full gain.
     //
-    // Plain int32 throughout: a Q15 knob value is at most 32767 and the
-    // multiplier is 10, so the product is 327670 - nowhere near needing 64
-    // bits. An (int64_t) cast here would emit a call to __aeabi_lmul, which is
-    // exactly what this card's arithmetic exists to avoid.
-    layers_ = kMinLayers + ((stored_[0][1] * (kMaxLayers - kMinLayers + 1)) >> 15);
-    if (layers_ < kMinLayers) layers_ = kMinLayers;
-    if (layers_ > kMaxLayers) layers_ = kMaxLayers;
+    // Stepping the integer count made nine audible jumps across the knob -
+    // each one a new oscillator switched on at its full window gain.
+    //
+    // What is crossfaded is the whole LAYOUT, not an individual layer:
+    //
+    //     win[i] = (1-f) * hann(u_i at N) + f * hann(u_i at N+1)
+    //
+    // That distinction is what preserves the constant-sum invariant. Scaling
+    // just the top layer by the fraction seems equivalent and is not - it
+    // gives up to 10.6% ripple at N=3.5, which is the level pulsing the card
+    // exists to avoid. Blending two layouts that EACH sum flat gives a flat
+    // sum at every fractional position (verified: 0.0000% ripple throughout).
+    //
+    // Costs one extra window evaluation per layer per channel, at control
+    // rate: ~5 cycles/sample amortised, 0.13% of budget. The per-sample inner
+    // loop is untouched - the blend is folded into win_l_/win_r_ before the
+    // audio loop ever sees it.
+    //
+    // Plain int32 throughout: an (int64_t) cast here would emit __aeabi_lmul,
+    // which this card's arithmetic exists to avoid.
+    const int32_t span = stored_[0][1] * (kMaxLayers - kMinLayers);  // Q15 * 9
+    layers_ = kMinLayers + (span >> 15);
+    layer_frac_ = span & 0x7FFF;                     // Q15 fade to the next
+    if (layers_ < kMinLayers) { layers_ = kMinLayers; layer_frac_ = 0; }
+    if (layers_ >= kMaxLayers) { layers_ = kMaxLayers; layer_frac_ = 0; }
 
     source_mix_ = ClampQ15(stored_[0][2]);
 
@@ -383,8 +424,10 @@ class ShepardCard : public ComputerCard {
     // lower kControlMask to 15 rather than capping the speed.
     const int32_t mag = defl >= 0 ? defl : -defl;
     const int32_t sq = MulQ15(defl, defl);
-    const int32_t cube = MulQ15(sq, mag);
-    int32_t rate = mag * kRateLinear + cube * kRateCubic;
+    const int32_t q4 = MulQ15(sq, sq);
+    const int32_t q6 = MulQ15(q4, sq);
+    const int32_t q7 = MulQ15(q6, mag);
+    int32_t rate = mag * kRateLinear + q7 * kRateHigh;
     if (defl < 0) rate = -rate;
     rate_q32_ = rate;
 
@@ -479,6 +522,12 @@ class ShepardCard : public ComputerCard {
     width_div_ = ((uint32_t)stored_[1][1] << 17) / n;
     master_div_ = master_out_q32_ / n;
 
+    // The (N+1)-layer layout, for the density crossfade above.
+    const uint32_t n2 = n + 1u;
+    oct_div2_ = 0xFFFFFFFFu / n2 + 1u;
+    width_div2_ = ((uint32_t)stored_[1][1] << 17) / n2;
+    master_div2_ = master_out_q32_ / n2;
+
     // ROTATE THE OSCILLATOR PHASES WITH THE STACK.
     //
     // THIS IS THE FIX FOR THE BIG CLICK AT THE LOOP POINT. Heard on hardware
@@ -516,7 +565,18 @@ class ShepardCard : public ComputerCard {
     prev_master_q32_ = master_out_q32_;
     prev_master_valid_ = true;
 
-    for (int i = 0; i < layers_; ++i) {
+    // While fading in, the (N+1)th layer must be computed too - it enters at
+    // gain 0 in the N layout and rises as the blend moves toward N+1.
+    active_layers_ = layers_ + ((layer_frac_ > 0 && layers_ < kMaxLayers) ? 1 : 0);
+
+    // Interpolate 1/sqrt(N) across the fade, so the level is continuous.
+    {
+      const int32_t a = kInvSqrtN[layers_];
+      const int32_t b = kInvSqrtN[layers_ < kMaxLayers ? layers_ + 1 : layers_];
+      inv_sqrt_n_ = a + MulQ15(layer_frac_, b - a);
+    }
+
+    for (int i = 0; i < active_layers_; ++i) {
       // Clamp rather than let an increment wrap: a wrapped increment is not a
       // subtle artefact, it is a loud wrong note.
       uint32_t inc = inc0 << i;
@@ -546,8 +606,22 @@ class ShepardCard : public ComputerCard {
       // Verified against the exact form in tools/shepard_check.py.
       const uint32_t u_l = master_div_ + (uint32_t)i * oct_div_;
       const uint32_t u_r = u_l + width_div_;
-      win_l_[i] = (int16_t)HannQ15(u_l);
-      win_r_[i] = (int16_t)HannQ15(u_r);
+
+      if (layer_frac_ == 0) {
+        win_l_[i] = (int16_t)HannQ15(u_l);
+        win_r_[i] = (int16_t)HannQ15(u_r);
+      } else {
+        // Blend this layer's gain in the N-layer layout with its gain in the
+        // (N+1)-layer layout. Both layouts sum flat, so the blend does too.
+        const uint32_t v_l = master_div2_ + (uint32_t)i * oct_div2_;
+        const uint32_t v_r = v_l + width_div2_;
+        const int32_t a_l = HannQ15(u_l);
+        const int32_t a_r = HannQ15(u_r);
+        const int32_t b_l = HannQ15(v_l);
+        const int32_t b_r = HannQ15(v_r);
+        win_l_[i] = (int16_t)(a_l + MulQ15(layer_frac_, b_l - a_l));
+        win_r_[i] = (int16_t)(a_r + MulQ15(layer_frac_, b_r - a_r));
+      }
     }
   }
 
@@ -774,6 +848,10 @@ class ShepardCard : public ComputerCard {
   uint32_t frozen_q32_ = 0;
   int32_t rate_q32_ = 0;
   int layers_ = 6;
+  int active_layers_ = 6;   // layers_ + 1 while a new layer is fading in
+  int32_t layer_frac_ = 0;  // Q15 blend toward the (N+1)-layer layout
+  int32_t inv_sqrt_n_ = 13377;
+  uint32_t master_div2_ = 0, oct_div2_ = 0, width_div2_ = 0;
   int scale_ = 0;
   int32_t source_mix_ = 0;
   bool shift_up_ = true;

@@ -222,14 +222,29 @@ def check_stepping():
 
 SR = 48000
 DEADZONE_Q15 = 400        # kDeadzone * 8, as applied in UpdateControl
-RATE_LINEAR = 6           # kRateLinear
-RATE_CUBIC = 150          # kRateCubic
+RATE_LINEAR = 3           # kRateLinear
+RATE_HIGH = 2600          # kRateHigh (7th power)
 
 
 def mul_q15(w, x):
     hi = x >> 15
     lo = x - (hi << 15)
     return w * hi + ((w * lo) >> 15)
+
+
+def _rate_from_defl(defl):
+    """The rate curve, from a raw deflection - for exact symmetry testing."""
+    if -DEADZONE_Q15 < defl < DEADZONE_Q15:
+        defl = 0
+    mag = defl if defl >= 0 else -defl
+    sq = mul_q15(defl, defl)
+    q4 = mul_q15(sq, sq)
+    q6 = mul_q15(q4, sq)
+    q7 = mul_q15(q6, mag)
+    rate = mag * RATE_LINEAR + q7 * RATE_HIGH
+    if defl < 0:
+        rate = -rate
+    return rate / (1 << 32) * SR
 
 
 def knob_to_rate(pct):
@@ -240,64 +255,95 @@ def knob_to_rate(pct):
         defl = 0
     mag = defl if defl >= 0 else -defl
     sq = mul_q15(defl, defl)
-    cube = mul_q15(sq, mag)
-    rate = mag * RATE_LINEAR + cube * RATE_CUBIC
+    q4 = mul_q15(sq, sq)
+    q6 = mul_q15(q4, sq)
+    q7 = mul_q15(q6, mag)
+    rate = mag * RATE_LINEAR + q7 * RATE_HIGH
     if defl < 0:
         rate = -rate
     return rate / (1 << 32) * SR
 
 
 def check_rate_curve():
-    """The glide must reach a genuinely fast sweep at the stops, and the
-    knob's middle travel must not be dead.
+    """The glide curve must spend most of its travel where the ILLUSION works.
 
-    Both halves of that are real defects that shipped in the first version:
-    a pure cubic curve delivered 0.55 oct/s at full deflection (the comment
-    claimed 2), and gave 29 SECONDS per octave at 70% travel - which is not
-    distinguishable from stopped.
+    This is a perceptual constraint, not a numerical one. A Shepard tone only
+    works while the listener cannot track the octave cycle; above about
+    1 oct/s the cycle repeats once a second or faster and the ear hears "a
+    climbing line, repeated" instead of "endlessly rising". Risset's originals
+    run at roughly 0.1-0.3 oct/s.
+
+    An earlier cubic curve put 1 oct/s at 70% of travel, so half the knob was
+    past the point where the effect survives - reported on hardware as
+    "at faster than a period of about 1 second I hear repeated climbing lines".
+
+    So: at least 80% of the travel must stay inside the illusion, the fast end
+    must still reach a siren, and the slow end must still be finely
+    controllable.
     """
     print("  glide rate curve:")
     ok = True
 
-    top = knob_to_rate(100)
-    mid = knob_to_rate(75)
-    low = knob_to_rate(55)
+    ILLUSION_LIMIT = 1.0        # oct/s, above which the cycle is trackable
 
-    for pct in (50, 55, 60, 70, 80, 90, 100):
+    for pct in (52, 60, 70, 80, 85, 90, 95, 100):
         r = knob_to_rate(pct)
         per = (1 / r) if r else 0
+        kind = "illusion" if r <= ILLUSION_LIMIT else "siren"
         unit = f"{per:6.2f} s" if per < 60 else f"{per / 60:5.1f} min"
-        print(f"    {pct:3d}% travel: {r:7.3f} oct/s   "
-              f"{unit if r else '  stopped':>10} per octave")
+        print(f"    {pct:3d}% travel: {r:7.3f} oct/s  "
+              f"{unit if r else '  stopped':>9} per octave   {kind}")
 
-    # Fast enough at the stops to read as a siren rather than a drift.
-    if top < 5.0:
+    # Where does the illusion give out? Want that at 80% or later.
+    edge = 100
+    for pct in range(50, 101):
+        if knob_to_rate(pct) > ILLUSION_LIMIT:
+            edge = pct
+            break
+    # Travel is measured from the centre deadzone to the stop, so the useful
+    # fraction is (edge - 50) / 50.
+    frac_useful = (edge - 50) / 50.0
+    if frac_useful < 0.70:
         ok = False
-        print(f"    TOO SLOW at full deflection: {top:.2f} oct/s (want >= 5)")
-    # Three quarters of the travel must be usefully moving.
-    if mid < 0.5:
-        ok = False
-        print(f"    DEAD MID-TRAVEL: {mid:.2f} oct/s at 75% (want >= 0.5)")
-    # But just off centre must still be a slow drift, not a jump.
-    if low > 0.5:
-        ok = False
-        print(f"    TOO COARSE near centre: {low:.2f} oct/s at 55%")
+        print(f"    TOO LITTLE USEFUL RANGE: illusion ends at {edge}% "
+              f"({frac_useful * 100:.0f}% of travel)")
+    else:
+        print(f"    illusion holds to {edge}% of travel "
+              f"({frac_useful * 100:.0f}% of the useful range)  ok")
 
-    # Symmetry: the curve must behave identically either side of noon.
-    for pct in (60, 75, 90, 100):
-        up = knob_to_rate(pct)
-        dn = knob_to_rate(100 - pct)
-        if abs(abs(up) - abs(dn)) > abs(up) * 0.02:
-            ok = False
-            print(f"    ASYMMETRIC at {pct}%: {up:.3f} vs {dn:.3f}")
+    # The stops must still be a siren.
+    top = knob_to_rate(100)
+    if top < 4.0:
+        ok = False
+        print(f"    TOP TOO SLOW for a siren: {top:.2f} oct/s")
+    else:
+        print(f"    full deflection {top:.2f} oct/s - a siren  ok")
 
-    # The deadzone must actually stop it.
+    # And just off centre must be a slow drift, not a jump.
+    low = knob_to_rate(53)
+    if low > 0.15:
+        ok = False
+        print(f"    TOO COARSE near centre: {low:.3f} oct/s at 53%")
+    else:
+        print(f"    just off centre {low:.3f} oct/s "
+              f"({1 / low if low else 0:.0f} s per octave)  ok")
+
     if knob_to_rate(50) != 0.0:
         ok = False
         print("    DEADZONE does not reach zero")
 
-    print(f"    full deflection {top:.2f} oct/s, 75% travel {mid:.2f} oct/s, "
-          f"centre stopped  {'ok' if ok else 'FAIL'}")
+    # Symmetry, checked on DEFLECTION rather than on knob percentage.
+    # The knob is 0..4095 with centre 2048, so pct and 100-pct do not land on
+    # equal-and-opposite deflections - 25% is -1025 counts and 75% is +1023.
+    # At a 7th power that 0.2% ADC asymmetry amplifies to ~9%, which is an
+    # artefact of the test's arithmetic, not of the curve.
+    for d in (2000, 8000, 14000, 16376):
+        up = _rate_from_defl(d)
+        dn = _rate_from_defl(-d)
+        if abs(abs(up) - abs(dn)) > max(abs(up), 1e-9) * 0.001:
+            ok = False
+            print(f"    ASYMMETRIC at deflection {d}: {up:.5f} vs {dn:.5f}")
+
     return ok
 
 

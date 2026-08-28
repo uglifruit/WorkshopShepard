@@ -3,15 +3,15 @@
 An infinite glissando for the Music Thing Modular Workshop System Computer —
 a pitch that rises or falls forever without ever leaving its range.
 
-> ## ⚠️ DRAFT — never tested on hardware
+> ## ⚠️ DRAFT — on hardware, still being shaken out
 >
-> This card has not been flashed or played. It compiles clean, and its DSP is
-> verified by a host test suite, but **every description of how it sounds is a
-> prediction from the algorithm — not an observation.**
+> The card has been flashed and played. Several rounds of listening have found
+> and fixed real bugs — a click at the loop, a silent page, a too-quiet blend,
+> a glide running 32× slow — but it is **not finished**, and the fixes from the
+> most recent round have not themselves been heard yet.
 >
-> There is no released binary. The DSP load is unmeasured. Treat everything
-> below as intent rather than as fact, and see [docs/BRINGUP.md](docs/BRINGUP.md)
-> for the ordered first hardware session.
+> There is no released binary and the DSP load is still unmeasured. See
+> [docs/BRINGUP.md](docs/BRINGUP.md) for the ordered hardware session.
 
 ## What it does
 
@@ -25,10 +25,16 @@ Turn Main clockwise and the pitch climbs and keeps climbing. Turn it
 anticlockwise and it falls without ever reaching the bottom. Park it at noon
 and the stack sits still, a drone made of octaves.
 
-The speed range is deliberately wide: a barely-perceptible drift of about eight
-seconds per octave just off centre, through a clear glide around three quarters
-of the way, to roughly eight octaves per second at the stops — fast enough to
-read as a siren rather than a glissando.
+The speed range is deliberately wide, and weighted heavily toward the slow end:
+about 46 seconds per octave just off centre, roughly a second per octave at
+85% of the travel, and up to eight octaves per second at the stops.
+
+That weighting is not arbitrary. **A Shepard tone only works while you cannot
+track the octave cycle** — above about one octave per second the cycle repeats
+often enough to hear, and it stops sounding like an endless rise and starts
+sounding like a climbing line played over and over. So most of the knob lives
+below that threshold, and the last stretch is there for when you want the
+siren rather than the illusion.
 
 The card does this two ways at once, and Y crossfades between them:
 
@@ -58,7 +64,7 @@ is a button, not a third page.
 
 | Knob | Function |
 |---|---|
-| **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. Roughly 8 s per octave just off centre, down to about 0.13 s at the stops. Summed with CV In 1. |
+| **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. About 85% of the travel sits inside the illusion (46 s down to 1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
 | **X** | **Density** — 3 to 12 octave layers. |
 | **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
 

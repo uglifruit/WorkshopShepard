@@ -174,8 +174,10 @@ class Hilbert:
 class Engine:
     """The card's normal-boot render path, as main.cpp runs it."""
 
-    def __init__(self, layers=8, width=0, scale=0, source_mix=0):
+    def __init__(self, layers=8, width=0, scale=0, source_mix=0,
+                 layer_frac=0):
         self.layers = layers
+        self.layer_frac = layer_frac
         self.width = width
         self.scale = scale
         self.source_mix = source_mix
@@ -190,6 +192,7 @@ class Engine:
         self.master_free = 0
         self.master_out = 0
         self.win_phase = 0
+        self.active = layers
         self.prev_master = None
         self.hilbert = Hilbert()
         self.rate = 0
@@ -241,7 +244,15 @@ class Engine:
                     self.osc[i] = self.osc[i + 1]
         self.prev_master = self.master_out
 
-        for i in range(n):
+        # (N+1)-layer layout, for the density crossfade
+        n2 = n + 1
+        od2 = (0xFFFFFFFF // n2) + 1
+        wd2 = ((self.width << 17) // n2) & 0xFFFFFFFF
+        md2 = self.master_out // n2
+        f = self.layer_frac
+        self.active = n + (1 if (f > 0 and n < MAX_LAYERS) else 0)
+
+        for i in range(self.active):
             inc = (inc0 << i) & 0xFFFFFFFF
             if inc > 0x7FFFFFFF:
                 inc = 0x7FFFFFFF
@@ -249,8 +260,16 @@ class Engine:
             self.mod_inc[i] = (shift_base << i) & 0xFFFFFFFF
             u_l = (md + i * od) & 0xFFFFFFFF
             u_r = (u_l + wd) & 0xFFFFFFFF
-            self.win_l[i] = hann_q15(u_l)
-            self.win_r[i] = hann_q15(u_r)
+            if f == 0:
+                self.win_l[i] = hann_q15(u_l)
+                self.win_r[i] = hann_q15(u_r)
+            else:
+                v_l = (md2 + i * od2) & 0xFFFFFFFF
+                v_r = (v_l + wd2) & 0xFFFFFFFF
+                a_l, a_r = hann_q15(u_l), hann_q15(u_r)
+                b_l, b_r = hann_q15(v_l), hann_q15(v_r)
+                self.win_l[i] = a_l + mul_q15(f, b_l - a_l)
+                self.win_r[i] = a_r + mul_q15(f, b_r - a_r)
 
     def render(self, n_samples, audio_in=None):
         """Returns (left, right) lists of int16-range samples."""
@@ -286,7 +305,9 @@ class Engine:
                 acc_l += mul_q15(v, self.win_l[i])
                 acc_r += mul_q15(v, self.win_r[i])
 
-            g = INV_SQRT_N[self.layers]
+            a = INV_SQRT_N[self.layers]
+            b = INV_SQRT_N[min(self.layers + 1, MAX_LAYERS)]
+            g = a + mul_q15(self.layer_frac, b - a)
             left.append(soft_clip_out(mul_q15(acc_l, g) >> 5))
             right.append(soft_clip_out(mul_q15(acc_r, g) >> 5))
         return left, right

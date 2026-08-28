@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — four bugs the tests all missed
+## Found on HARDWARE — six findings, five bugs and one law of physics
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -159,6 +159,61 @@ Worth recording that I chased the window first — a free-running window phase,
 then a "unified" phase design — and both were wrong turns. The user's
 description of the SOUND ("new overtone at full volume") pointed at a layer
 entering wrongly, which is where the answer was.
+
+### 5. The illusion's own perceptual limit — NOT a bug
+
+Reported as *"I can hear it sirening up and down, especially at pace"* and then,
+decisively, *"at faster than a period of about 1 second I hear repeated
+climbing lines"*.
+
+That second observation is the answer, and it is not a defect. **A Shepard tone
+only works while the listener cannot track the octave cycle.** Above roughly
+1 oct/s the cycle repeats once a second or faster and the ear stops hearing
+"endlessly rising" and starts hearing "a climbing line, repeated" — because
+that is exactly what it is. Every implementation has this limit; Risset's
+originals run at about 0.1–0.3 oct/s.
+
+The real fault was mine in the knob mapping: the cubic curve put 1 oct/s at
+**70% of travel**, so half the knob was past where the effect survives. That
+came from over-correcting an earlier "not fast enough at the extremes" note.
+
+Now a **seventh** power, `mag*3 + defl⁷*2600`:
+
+    52%   0.02 oct/s     46 s per octave
+    70%   0.22           4.6 s
+    85%   0.97           1.0 s        <- the perceptual edge
+    92%   2.6            0.38 s       siren
+   100%   7.9            0.13 s       siren
+
+86% of the travel now sits inside the illusion, with the top for deliberate
+sirens. `check_rate_curve` asserts that fraction directly, so the constraint
+is recorded as perceptual rather than numerical.
+
+**Window ripple was ruled out first**: amplitude sum, power sum and A-weighted
+loudness are all flat to 0.00% at every layer count. The swing that did show up
+in rendered audio (2.3 dB at N=3) is scattered rather than octave-periodic —
+ordinary beating between three widely spaced oscillators.
+
+### 6. Density stepped instead of fading
+
+X quantised to an integer layer count, so a new oscillator appeared at full
+window gain the moment the count incremented — nine audible jumps across the
+knob.
+
+Now the layer count is fractional and the **whole LAYOUT crossfades**:
+
+    win[i] = (1-f)*hann(u_i at N) + f*hann(u_i at N+1)
+
+That distinction is load-bearing. Scaling just the top layer by the fraction
+looks equivalent and is not: it gives up to **10.6% window ripple** at N=3.5,
+which is precisely the level pulsing this card exists to avoid. Blending two
+layouts that each sum flat gives a flat sum at every fractional position —
+verified 0.0000% throughout. `1/√N` is interpolated across the fade too, or the
+level steps where the layers no longer do.
+
+Costs one extra window evaluation per layer per channel at control rate: about
+5 cycles/sample amortised, 0.13% of budget. The per-sample inner loop is
+untouched.
 
 ### The lesson, which is the same one four times
 
