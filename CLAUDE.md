@@ -246,6 +246,40 @@ the tail at every setting.
 | `hilbert.cpp` | `tools/hilbert_check.py` | transfer function, quadrature, sideband rejection, both traps, MulQ30 |
 | `spiral.h` | `tools/spiral_check.py` | shift ratio, crossfade, buffer bounds, loop stability at DC |
 | **whole chain** | **`tools/passthru_check.py`** | **end-to-end gain — run after ANY scaling change** |
+| whole engine | `tools/shepsim.py` | renders WAVs, and the seam analysis (below) |
+
+## The seam analysis, and a lesson about detectors
+
+`tools/shepsim.py` runs the exact integer engine and writes audio, so the
+card can be heard before it is flashed. It also answers the make-or-break
+question objectively: **is the octave wrap detectable?**
+
+The first version of that analysis reported three measures and **two of them
+were worthless.** Deliberately breaking the window lookup and re-running gave:
+
+                    correct        broken
+    level ratio     1.1896         1.1893      <- cannot tell them apart
+    HF splatter     1.0934         1.0930      <- cannot tell them apart
+    seam step       0.8000         1.0000      <- the real signal
+
+Level periodicity at low layer counts is **not** a seam. It is ordinary
+beating between three widely spaced oscillators — the phase-folded profile
+is scattered, not dipped at any consistent phase. A detector built on it
+condemns a perfectly good card.
+
+Two things follow, and both are now in the code:
+
+1. **The verdict rests on seam step alone** — the largest sample-to-sample
+   jump near a wrap boundary, over the largest jump anywhere. A real
+   discontinuity puts the global maximum exactly at the seam and scores 1.00.
+2. **The check calibrates itself every run.** It breaks the window on
+   purpose first and confirms the measure responds, because a detector that
+   never fires is indistinguishable from one that cannot fire. If the
+   control fails to separate, it says so and withholds the verdict.
+
+Current result: control 1.00, real build 0.44–0.96 at every layer count.
+No wrap discontinuity. **Expect audible gentle beating at N=3 regardless** —
+that is three oscillators, not a defect.
 
 ## Still to do
 

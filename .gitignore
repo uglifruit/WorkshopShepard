@@ -18,3 +18,4 @@ __pycache__/
 
 # Rendered reference audio from the tools - regenerate as needed.
 tools/*.wav
+tools/*.png

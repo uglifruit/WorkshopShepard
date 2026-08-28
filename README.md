@@ -182,6 +182,38 @@ truncated window lookup that rippled 0.48% at odd layer counts while testing
 clean at even ones; `passthru_check.py` caught output running 4 dB too hot,
 sitting in soft clip up to 10% of the time.
 
+### Hearing it before flashing
+
+`tools/shepsim.py` runs the same integer engine and writes WAVs, so the card
+can be listened to without hardware:
+
+```
+python tools/shepsim.py                  # the wrap-seam set
+python tools/shepsim.py --all            # every mode
+python tools/shepsim.py --analyse-only   # just the seam verdict, no files
+python tools/shepsim.py --spectrogram    # PNGs as well (needs matplotlib)
+```
+
+It also answers the card's make-or-break question objectively — *is the octave
+wrap detectable?* — by measuring the largest sample-to-sample jump near a wrap
+against the largest anywhere in the signal. The check **calibrates itself**:
+every run first breaks the window lookup on purpose and confirms the measure
+responds, because a detector that never fires looks exactly like one that
+cannot.
+
+Current verdict: control (broken) 1.00, real build 0.44–0.96 at every layer
+count. No wrap discontinuity.
+
+**Listen for** a click, a lurch, a level dip, or a moment where the pitch
+appears to reset rather than continue. `out_wrap_fast_N03.wav` glides an octave
+per second, so any seam becomes a 1 Hz rhythm — far easier to notice than a
+single event in a slow sweep. N=3 is the exposed case: fewest layers, least
+masking.
+
+**What is not a fault:** gentle beating at three layers. That is the sound of
+three widely spaced oscillators, and the analysis specifically distinguishes it
+from a wrap artefact.
+
 ## Building
 
 ```
