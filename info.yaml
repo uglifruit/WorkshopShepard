@@ -1,0 +1,226 @@
+draft: true
+Name: SHEPARD
+Description: An infinite glissando — Shepard-Risset tones that rise or fall forever, for the internal voice or for live audio through a Hilbert frequency shifter
+Language: C++ (ComputerCard)
+Creator: Andy Jenkinson (uglifruit)
+Version: "0.1.0"
+Status: Draft
+License: MIT
+repository: https://github.com/uglifruit/WorkshopShepard
+Editor: none
+date: 2026-08-28
+
+# NOT YET TESTED ON HARDWARE. Everything in the summary below about how the
+# card sounds is a prediction from the algorithm and from the host test suite,
+# not an observation. Flip draft/Status and populate UF2/ only after playing it.
+
+contact:
+  social:
+    github: https://github.com/uglifruit
+
+uf2: []
+
+tags:
+  - effect
+  - synth
+  - pitch-shift
+  - shepard
+  - glissando
+  - scale
+  - frequency-shifter
+  - delay
+
+summary: |
+  SHEPARD generates Shepard-Risset tones: the auditory illusion of a pitch that
+  glides forever upward or downward without ever leaving its range. Octave-spaced
+  components slide together through a fixed spectral envelope, each fading in at
+  the bottom and out at the top; because the stack is octave-spaced, sliding it
+  by one whole octave returns it exactly to where it started, so the glide loops
+  seamlessly.<br><br>
+
+  Main sets speed and direction, with a deadzone at noon so the stationary
+  position can be found by feel — anticlockwise descends, clockwise ascends, and
+  CV In 1 is summed in. X sets density, 3 to 12 octave layers. Y crossfades
+  between two sources: the internal sine bank, and a Hilbert frequency shifter
+  that drags whatever is patched into Audio In 1 through the same structure.<br><br>
+
+  The live path is deliberately inharmonic. A frequency shifter moves every
+  partial by the same number of HERTZ rather than by the same ratio, so a
+  harmonic series comes back stretched and clanging. That is inherent to the
+  technique, not a fault — it is what Risset's own tape pieces sound like, and it
+  is why Y blends the two sources rather than the shifter replacing the
+  oscillators. The illusion still holds because the SHIFT AMOUNTS are
+  octave-spaced across the layers.<br><br>
+
+  Switch Up is page two: Main quantises the glide to smooth glissando, 12-ET
+  chromatic, major or pentatonic; X sets stereo width; Y sets output level.
+  Snapping is slewed over about 1.4 ms rather than jumped, because twelve
+  oscillators stepping together is audible as a thump. Pulse In 1 advances one
+  scale degree, and works alongside the glide rather than replacing it.<br><br>
+
+  Switch Down is spring-loaded: a short press toggles FREEZE, holding for two
+  seconds toggles SEALED freeze which also silences the live input. Pulse In 2
+  freezes while high. CV Out 1 is the master phase as a 0-5V ramp, one cycle per
+  octave; CV Out 2 reports the measured DSP load.<br><br>
+
+  ALT-BOOT: holding the switch DOWN at power-on starts SPIRAL, a delay whose
+  feedback path is pitch-shifted so every repeat comes back transposed and the
+  echoes spiral away forever. Main becomes shift amount (centre is unity, a clean
+  delay), X delay time, Y dry/wet, and page-two Main becomes feedback. Feedback
+  is capped higher than a plain delay would allow because the pitch shift is what
+  stabilises the loop — energy shifted up leaves through Nyquist, energy shifted
+  down leaves through the loop highpass.<br><br>
+
+  All fixed point: the RP2040 has no FPU, so a float multiply costs ~360ns
+  against a 20.8us per-sample budget. Two economies make a twelve-layer stereo
+  bank affordable — because the layers are exactly an octave apart every layer's
+  increment is layer 0's shifted left by i, so ONE exponential lookup serves all
+  twelve at 1.5kHz rather than 48kHz; and one Hilbert transform feeds all twelve
+  modulators, which is not only 12x cheaper but necessary, since separate
+  transforms would decorrelate the layers. The envelope reuses the first half of
+  the sine table rather than needing one of its own, and sums to exactly N/2 at
+  every layer count and phase.<br><br>
+
+  The fixed-point DSP is verified on the host before flashing — window
+  constant-sum, exponential accuracy, quadrature and sideband rejection, scale
+  quantisation across the octave wrap, delay loop stability run at DC, and
+  end-to-end gain. Two of those tests caught real bugs during development: a
+  truncated window lookup that rippled at odd layer counts only, and an output
+  stage running 4dB too hot. Flash 1.3%, RAM 56%.
+
+panel:
+  inputs:
+    - id: AudioIn1
+      name: In
+      type: audio
+      description: >
+        Source for the frequency shifter, and for the SPIRAL delay. Wants
+        something sustained and harmonically rich - pads, drones, noise,
+        cymbals, a whole mix. A solo melodic line comes back bent out of shape,
+        since the shift is linear rather than proportional.
+    - id: CVIn1
+      name: Speed
+      type: cv
+      description: >
+        Bipolar glide speed, summed with the Main knob. Applied after the
+        knob's deadzone, so CV still drives the glide with Main parked at noon.
+    - id: PulseIn1
+      name: Step
+      type: pulse
+      description: >
+        Advances one scale degree, in the stepped quantisation modes. Works
+        alongside the glide rather than replacing it - park Main at centre for
+        pure manual stepping.
+    - id: PulseIn2
+      name: Freeze
+      type: pulse
+      description: >
+        Holds the stack while high, independently of the switch latch. Always
+        the normal freeze, never SEALED.
+
+  outputs:
+    - id: AudioOut1
+      name: Left
+      type: audio
+      description: Left channel. Identical to the right at zero stereo width.
+    - id: AudioOut2
+      name: Right
+      type: audio
+      description: >
+        Right channel. Width decorrelates the two by offsetting the window
+        rather than the oscillator phase, so a mono sum stays valid and never
+        cancels.
+    - id: CVOut1
+      name: Phase
+      type: cv
+      description: >
+        Master glide position as a 0-5V ramp, one full cycle per octave. Patch
+        it to watch the glide, or to drive something else in step with it.
+    - id: CVOut2
+      name: DSP Load
+      type: cv
+      description: >
+        Measured cost of the audio ISR as a fraction of its 20.83us budget,
+        live and unsmoothed. Full scale means the ISR is exactly filling its
+        budget.
+
+controls:
+  knobs:
+    - when: Switch Middle (page 1)
+      main:
+        name: SPEED
+        description: >
+          Glide speed and direction. Centre is stationary, with a deadzone so it
+          can be found by feel; anticlockwise descends, clockwise ascends.
+      x:
+        name: DENSITY
+        description: >
+          Number of octave layers, 3 to 12. Higher counts make the illusion
+          smoother and more convincing; lower counts leave the individual
+          octaves audible.
+      y:
+        name: SOURCE
+        description: >
+          Crossfades from the internal sine bank (anticlockwise) to the live
+          audio frequency shifter (clockwise).
+    - when: Switch Up (page 2), normal boot
+      main:
+        name: QUANTISE
+        description: >
+          Smooth glissando, 12-ET chromatic, major, or pentatonic. Steps are
+          slewed over about 1.4ms rather than snapped.
+      x:
+        name: WIDTH
+        description: >
+          Stereo width, by offsetting the window position between channels.
+          Mono-safe at every setting.
+      y:
+        name: LEVEL
+        description: >
+          Output level. Holds its current value until the knob is actually
+          moved, so changing page never drops the volume.
+    - when: Switch Middle (page 1), SPIRAL alt-boot
+      main:
+        name: SHIFT
+        description: >
+          Pitch shift applied to each repeat, plus or minus 12 semitones.
+          Centre is unity - a clean, unshifted delay.
+      x:
+        name: TIME
+        description: Delay length, 25ms to 1.365s.
+      y:
+        name: MIX
+        description: Dry / wet balance.
+    - when: Switch Up (page 2), SPIRAL alt-boot
+      main:
+        name: FEEDBACK
+        description: >
+          Loop gain. Capped at 0.95 - higher than a plain delay would allow,
+          because the pitch shift itself stabilises the loop.
+
+  leds:
+    - when: Normal running
+      display: list
+      items:
+        - id: 0
+          name: Phase (quarter 1)
+        - id: 1
+          name: Phase (quarter 2)
+        - id: 2
+          name: Phase (quarter 3)
+        - id: 3
+          name: Freeze
+          description: Steady for normal freeze, slow pulse for SEALED freeze.
+        - id: 4
+          name: Page 1
+        - id: 5
+          name: Page 2
+    - when: Boot (first half second)
+      display: list
+      items:
+        - id: 0
+          name: Boot mode
+          description: >
+            LEDs 0, 2 and 4 light together for a normal boot; LEDs 1, 3 and 5
+            for the SPIRAL alt-boot. Held for about three quarters of a second
+            after the switch is read.
