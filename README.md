@@ -119,6 +119,14 @@ Feed it anything with clear pitch content — a voice, a synth line, a drone, a
 chord. Percussion works too but the transposed copies smear, since each read
 head spans a 341 ms window.
 
+**Grain length varies with the shift ratio**, and this is deliberate. The read
+window is a fixed span of the buffer, so a head playing at quarter speed
+produces grains four times longer in real time — descending lines audibly
+lengthen before being replaced by short high ones. Compensating for it gives
+uniform grains but wrecks the downshifts (the lowest layer drops to the point
+where artefacts are louder than the wanted octave), so quality wins. The
+barber's pole works macroscopically; an individual line shows its grain.
+
 Two earlier designs were tried and rejected, and the reason is the same for
 both: they treated the input as something to *process* while the structure
 moved past it. A **frequency shifter** moved every partial by the same hertz,

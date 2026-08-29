@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — fifteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — sixteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -499,6 +499,54 @@ recycle from 91 Hz to under 9 Hz.
 
 Level is also far more stable than the comb's: rms 308–358 across noise, drone
 and chord, because it transposes rather than resonates.
+
+### 16. Grain length varies with shift ratio — a trade-off, not a bug
+
+Reported precisely: *"when I descend I can hear the grains getting lower — but
+also LONGER, and the longer ones I can then hear being replaced by short higher
+ones. The barber's pole is working macroscopically but not on an individual
+line."*
+
+Exactly right. `kOctWin` is a fixed number of BUFFER samples, so its duration in
+REAL time is `win / rate`:
+
+    0.25x   1365 ms      2.0x    171 ms
+    0.50x    683 ms      4.0x     85 ms
+    1.00x    341 ms
+
+A 16× spread across the stack.
+
+**Compensating makes the shifter worse.** Scaling the window by the rate gives
+constant grain length but wrecks downshifts, because a short window cannot span
+enough of a low-frequency waveform:
+
+                        grain      transposition
+    fixed window        varies     +26 to +37 dB at every rate
+    rate-scaled         constant   **−16.6 dB at 0.25x** (artefacts win)
+    sqrt-scaled         4x spread  +4.4 dB at 0.25x, still marginal
+
+Decision: **keep the fixed window, quality first.** The macroscopic illusion
+works; individual lines have varying grain length. That is inherent to a
+two-tap granular shifter and the alternative is audibly worse.
+
+**A related question answered:** should the grains fade? They do — both
+envelopes are correct. The two-tap crossfade is sin²/cos² summing to exactly
+32767, and the layer window fades 0.000 → 1.000 → 0.000 across the cycle. What
+is heard starting and stopping is the RECYCLE: the two taps play unrelated
+moments of the buffer, so the LEVEL crossfades smoothly while the CONTENT
+jumps, and the ear tracks content. Unavoidable in any fixed-buffer shifter.
+
+### Headroom with many layers — checked, no overload
+
+    N=12 drone, full scale      peak 1503   knee 0.04%
+    N=12 chord, full scale      peak 1387   knee 0.00%
+    N=12 near-DC (coherent)     peak 1624   knee 1.35%
+    N=12 full-scale square      peak 1660   knee 0.92%
+
+Against a 2047 rail with a 1450 soft knee. The clipper engages ~1% of the time
+on pathological input and the rail is never reached. The octave stack is also
+much better behaved than the comb it replaced, because it transposes rather
+than resonates — level barely depends on source type.
 
 ### The lesson, which is the same one four times
 
