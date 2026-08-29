@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twelve findings, three of them my own fixes making things worse
+## Found on HARDWARE — thirteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -389,6 +389,40 @@ Make-up gain then recalibrated against the WORST case rather than the average:
 
 `comb_check.py::check_resonant_gain` now asserts on-centre gain stays near
 unity, using a steady tone on a band centre — the case that actually bites.
+
+### 13. The comb's resonator state did not rotate at the wrap
+
+The loudest fault the card has had, and the report pinned it precisely: *"a
+large phasy noise with a discreet start and stopping point... starts about
+halfway through LED1 being lit, stops before LED stops being lit... the pitch
+changes slightly depending on the position of Main."*
+
+Every detail of that is diagnostic. LEDs show `master >> 30`, so the event was
+tied to master phase, not to the input. A *discrete* start and stop means a
+resonator being switched, not a filter sweeping. And the pitch following Main
+means the ring-out frequency was **the band centre the glide had reached**.
+
+At an octave wrap the stack relabels: band *i* inherits band *i−1*'s centre.
+Finding 4 rotated the oscillator phases to match — but **not the comb's `lp_`
+and `bp_` state.** So a resonator holding energy at one frequency was suddenly
+retuned to another, and a charged resonator that is retuned rings out at the
+frequency it was charged at.
+
+Measured: state of 1.3e6, retuned down an octave, **rings out at peak 79558
+against a ±2047 rail — 39× over.** With X clockwise several bands do it at
+staggered times, which is the "multiple (3?) phasy tones, not all
+simultaneously".
+
+Fixed with `CombBank::RotateUp/RotateDown`, called from the same place as the
+oscillator rotation. `comb_check.py::check_retune_ringout` measures the
+ring-out both ways — 32590 retuned in place, 0 when rotated — and fails if the
+control does not separate.
+
+**A near-miss worth recording**: I first read this as a gain problem and
+dropped the input from `<< 6` to `<< 4`. That removed the clipping and left the
+card 15 dB quiet — trading a loud fault for a quiet one while the actual bug
+survived. With the rotation fixed, `<< 6` measures a worst-case peak of 1368
+against the 1450 knee. The gain was never wrong.
 
 ### The lesson, which is the same one four times
 

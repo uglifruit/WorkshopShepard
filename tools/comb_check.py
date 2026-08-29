@@ -248,12 +248,75 @@ def check_resonant_gain():
     return ok
 
 
+def check_retune_ringout():
+    """A charged resonator must never be retuned without its state moving too.
+
+    THE BUG THIS EXISTS FOR, and the loudest fault the card has had.
+
+    At an octave wrap the stack relabels: band i inherits band i-1's centre.
+    The oscillator phases were already rotated to match, but the COMB's
+    resonator state was not - so a band holding energy at one frequency was
+    suddenly retuned to another, and a charged resonator that is retuned rings
+    out at the frequency it was charged at.
+
+    Measured: a band holding 1.3e6 of state, retuned down an octave, rang out
+    at a peak of 79558 against a +-2047 rail. Heard as "a large phasy noise
+    with a discreet start and stopping point", once per octave, with its pitch
+    following the Main knob - because the ring-out frequency is the old band
+    centre, which depends on where the glide had reached.
+
+    This asserts the ring-out is small when the state moves with the tuning.
+    """
+    print("  retuning a charged resonator (the octave wrap):")
+    ok = True
+    for fc_old, fc_new in ((65.4, 32.7), (131.0, 65.4), (524.0, 262.0)):
+        f_old = tune_from_inc(int(fc_old / SR * (1 << 32)))
+        f_new = tune_from_inc(int(fc_new / SR * (1 << 32)))
+
+        # Charge the resonator at its own centre.
+        lp = bp = 0
+        for k in range(20000):
+            x = int(32768 * math.sin(2.0 * math.pi * fc_old * k / SR))
+            lp += mul_q20(f_old, bp)
+            hp = x - lp - mul_q15(COMB_Q, bp)
+            bp += mul_q20(f_old, hp)
+        charged = abs(bp)
+
+        # WRONG: retune in place, input removed.
+        lpw, bpw = lp, bp
+        bad = 0
+        for _ in range(20000):
+            lpw += mul_q20(f_new, bpw)
+            hp = -lpw - mul_q15(COMB_Q, bpw)
+            bpw += mul_q20(f_new, hp)
+            bad = max(bad, abs(mul_q15(COMB_Q, bpw)))
+
+        # RIGHT: the state moves with the tuning, so this band receives the
+        # state that belongs at the new centre - modelled as starting clean.
+        lpg = bpg = 0
+        good = 0
+        for _ in range(20000):
+            lpg += mul_q20(f_new, bpg)
+            hp = -lpg - mul_q15(COMB_Q, bpg)
+            bpg += mul_q20(f_new, hp)
+            good = max(good, abs(mul_q15(COMB_Q, bpg)))
+
+        print(f"    {fc_old:6.1f} -> {fc_new:5.1f} Hz: state {charged:8d}, "
+              f"ring-out if retuned in place {bad:7d}, if rotated {good:5d}")
+        if bad <= good * 4:
+            ok = False
+            print("      (control failed to separate - test not discriminating)")
+    print(f"    {'rotation is what prevents the ring-out' if ok else 'FAIL'}")
+    return ok
+
+
 def main():
     print("SHEPARD rising comb check")
     ok = check_tuning()
     ok &= check_stability()
     ok &= check_selectivity()
     ok &= check_resonant_gain()
+    ok &= check_retune_ringout()
     ok &= check_centres_match_oscillators()
     ok &= check_level_across_glide()
     print("PASS" if ok else "FAIL")

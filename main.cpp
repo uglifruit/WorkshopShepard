@@ -280,14 +280,16 @@ class ShepardCard : public ComputerCard {
     // the same octave-spaced centres as the oscillators, weighted by the same
     // window. See comb.h for why this replaced a frequency shifter.
     //
-    // << 6 is MAKE-UP GAIN, measured against the WORST CASE rather than the
-    // average one. The comb's output is normalised by its resonant gain (see
-    // comb.h), which removes the ~16x boost an on-centre tone used to get.
+    // << 6, measured against the worst case: a full-scale tone sitting on a
+    // band centre while the stack glides across octave wraps. That gives a
+    // peak of 1368 against the 1450 soft knee - zero clipping - with a drone
+    // landing at rms 295 against the synth voice's 443.
     //
-    // Calibrated on a sustained tonal drone, not on noise: noise never sits on
-    // a band centre long enough to ring, so it flatters the gain staging. At
-    // << 6 nothing clips on noise, drone or chord, with a drone landing at
-    // rms 388 against the synth voice's 443.
+    // Note this is the same figure that distorted badly BEFORE the resonator
+    // state was rotated at the wrap (see comb.h). The gain was never the real
+    // fault: a charged resonator being retuned an octave was, and it rang out
+    // at 39x the rail. Fixing the level alone would have traded a loud fault
+    // for a quiet one.
     const int32_t in = sealed_ ? 0 : ((int32_t)AudioIn1() << 6);
 
     for (int i = 0; i < active_layers_; ++i) {
@@ -569,10 +571,15 @@ class ShepardCard : public ComputerCard {
       if (prev_master_q32_ > 0xC0000000u && master_out_q32_ < 0x40000000u) {
         // ascending: the pattern shifts up in index
         for (int i = kMaxLayers - 1; i > 0; --i) osc_q32_[i] = osc_q32_[i - 1];
+        // The comb's resonator state must rotate WITH it - see comb.h. A
+        // charged resonator retuned an octave rings out at its old centre,
+        // which was the loud phasy tone arriving once per octave.
+        comb_.RotateUp();
       } else if (prev_master_q32_ < 0x40000000u &&
                  master_out_q32_ > 0xC0000000u) {
         // descending
         for (int i = 0; i < kMaxLayers - 1; ++i) osc_q32_[i] = osc_q32_[i + 1];
+        comb_.RotateDown();
       }
     }
     prev_master_q32_ = master_out_q32_;

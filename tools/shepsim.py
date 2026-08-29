@@ -241,9 +241,17 @@ class Engine:
             if self.prev_master > 0xC0000000 and self.master_out < 0x40000000:
                 for i in range(len(self.osc) - 1, 0, -1):
                     self.osc[i] = self.osc[i - 1]
+                    self.comb.lp[i] = self.comb.lp[i - 1]
+                    self.comb.bp[i] = self.comb.bp[i - 1]
+                self.comb.lp[0] = 0
+                self.comb.bp[0] = 0
             elif self.prev_master < 0x40000000 and self.master_out > 0xC0000000:
                 for i in range(len(self.osc) - 1):
                     self.osc[i] = self.osc[i + 1]
+                    self.comb.lp[i] = self.comb.lp[i + 1]
+                    self.comb.bp[i] = self.comb.bp[i + 1]
+                self.comb.lp[-1] = 0
+                self.comb.bp[-1] = 0
         self.prev_master = self.master_out
 
         # DISCRETE layer count - no fade. Adding a layer respaces the whole

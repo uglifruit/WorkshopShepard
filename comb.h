@@ -97,6 +97,38 @@ class CombBank {
     return MulQ15(kCombQ, bp_[i]);
   }
 
+  // Rotate the resonator state with the stack at an octave wrap.
+  //
+  // THIS IS AS NECESSARY AS ROTATING THE OSCILLATOR PHASES, and for the same
+  // reason: at a wrap, band i inherits band i-1's centre frequency. Its
+  // resonator is holding energy at the OLD centre, and a charged resonator
+  // that is suddenly retuned rings out at the frequency it was charged at.
+  //
+  // Measured: a band holding 1.3e6 of state, retuned down an octave, rings
+  // out at a peak of 79558 against a +-2047 rail - 39x over. Heard as "a
+  // large phasy noise with a discrete start and stopping point", arriving
+  // once per octave.
+  //
+  // Rotating the state moves it to the band that now has that centre, so the
+  // energy stays where it belongs and nothing is retuned while charged.
+  void __not_in_flash_func(RotateUp)() {
+    for (int i = kMaxLayers - 1; i > 0; --i) {
+      lp_[i] = lp_[i - 1];
+      bp_[i] = bp_[i - 1];
+    }
+    lp_[0] = 0;
+    bp_[0] = 0;
+  }
+
+  void __not_in_flash_func(RotateDown)() {
+    for (int i = 0; i < kMaxLayers - 1; ++i) {
+      lp_[i] = lp_[i + 1];
+      bp_[i] = bp_[i + 1];
+    }
+    lp_[kMaxLayers - 1] = 0;
+    bp_[kMaxLayers - 1] = 0;
+  }
+
   // Tuning coefficient for a centre frequency given as a Q32 phase increment
   // (the same representation the oscillator bank uses, so a band and its
   // matching oscillator are guaranteed to agree).
