@@ -67,8 +67,12 @@ static constexpr int32_t kSpiralMaxFeedback = 31129;
 
 class SpiralDelay {
  public:
-  void Init() {
-    memset(buf_, 0, sizeof(buf_));
+  // The buffer is passed in rather than owned, so it can be SHARED with the
+  // octave stack: SPIRAL only runs in alt-boot and the octave stack only in
+  // normal boot, so they never coexist and 128 KB serves both.
+  void Init(int16_t* buf) {
+    buf_ = buf;
+    memset(buf_, 0, sizeof(int16_t) * kSpiralLen);
     write_ = 0;
     read_q16_ = 0;
     damp_state_ = 0;
@@ -189,7 +193,7 @@ class SpiralDelay {
     return a + (int32_t)(((b - a) * frac) >> 16);
   }
 
-  int16_t buf_[kSpiralLen];
+  int16_t* buf_ = nullptr;
   uint32_t write_;
   uint32_t read_q16_;
   int32_t damp_state_;

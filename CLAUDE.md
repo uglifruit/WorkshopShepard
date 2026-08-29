@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — fourteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — fifteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -456,6 +456,50 @@ silently bring the snapping back.
 Also worth noting: the internal resonator state is ~10x smaller at Q = 4, which
 gives the whole path far more headroom than it had.
 
+### 15. The live path, third attempt: OCTAVE-STACK the input
+
+Two designs rejected by ear, and they failed the same way — both treated the
+input as something to PROCESS while the structure moved past it:
+
+  **Frequency shifter** — moved every partial by the same hertz, breaking the
+  harmonic series. The source came back unrecognisable, so the relationship
+  between input and output was inaudible.
+
+  **Rising comb** — swept resonant bands across the input. A given partial was
+  only heard while a band crossed it, so it came and went rather than
+  participating in the glide.
+
+The third applies the Shepard CONSTRUCTION instead of an effect: one delay
+line, N read heads at 2^i the write rate, so every partial is transposed into
+N octave-spaced copies and each rises and fades through the same window as an
+oscillator layer. The internal voice is octave-stacked sines; this is
+octave-stacked *you*.
+
+Costs no extra RAM — SPIRAL's 128 KB buffer is idle in normal boot and this is
+idle in alt-boot, so `g_delay_buf` serves both.
+
+**Two things it needed, both found by measurement:**
+
+1. **Drift, not an absolute read pointer.** The obvious form advances a pointer
+   at `rate`; at 2× it races away from the write pointer at 1×, laps the buffer
+   repeatedly, and the crossfade has no relationship to the lap period. That
+   put a spurious component **45 dB ABOVE** the wanted octave. Accumulating
+   `rate - unity` keeps each head permanently within one window.
+
+2. **A long crossfade window — 16384, not 8192.** The two taps sit half a
+   window apart in the BUFFER, which at rate *r* is only `(win/2)/r` apart in
+   real time, so as the ratio rises they converge on the same moment and the
+   crossfade stops hiding the recycle. Measured at 4×: wanted octave dominant
+   by **−9.9 dB at win 4096, +0.6 at 8192, +18.5 at 16384**. It also halves
+   every recycle rate.
+
+Rates are capped at 4× and the stack is CENTRED (`2^(master + i − N/2)`) so
+they straddle unity — heads reading slower drift slowly, which took the worst
+recycle from 91 Hz to under 9 Hz.
+
+Level is also far more stable than the comb's: rms 308–358 across noise, drone
+and chord, because it transposes rather than resonates.
+
 ### The lesson, which is the same one four times
 
 A test that begins *downstream* of the thing that is broken cannot see it.
@@ -668,7 +712,7 @@ the tail at every setting.
 |---|---|---|
 | `shepard.cpp` | `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, split divisor, illusion continuity |
 | `shepard.cpp` | `tools/quant_check.py` | scale tables, octave wrap, portamento direction, stepping |
-| `comb.h` | `tools/comb_check.py` | tuning accuracy, stability at every centre, selectivity, centres match the oscillators, level across the glide |
+| `octave.h` | `tools/octave_check.py` | transposition ratio, crossfade constant-sum, recycle rates, head rotation at the wrap |
 | `spiral.h` | `tools/spiral_check.py` | shift ratio, crossfade, buffer bounds, loop stability at DC |
 | **whole chain** | **`tools/passthru_check.py`** | **end-to-end gain — run after ANY scaling change** |
 | whole engine | `tools/shepsim.py` | renders WAVs, and the seam analysis (below) |

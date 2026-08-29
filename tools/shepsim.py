@@ -130,48 +130,42 @@ def snap_to_scale(pos, scale):
     return below if d_below <= d_above else above
 
 
-COMB_Q = 8192
-COMB_MAX_INC = 671088640
+OCT_LEN = 1 << 15
+OCT_MASK = OCT_LEN - 1
+OCT_WIN = 16384
+OCT_MAX_RATE = 262144
 
 
-def mul_q20(w, x):
-    hi = x >> 15
-    lo = x - (hi << 15)
-    return ((w * hi) >> 5) + ((w * lo) >> 20)
-
-
-def tune_from_inc(inc):
-    """CombBank::TuneFromInc - Q20, linear below 750 Hz, table above."""
-    if inc > COMB_MAX_INC:
-        inc = COMB_MAX_INC
-    if inc < (1 << 26):
-        f = ((inc >> 11) * 205887) >> 16
-    else:
-        idx = (inc >> 23) & 0x1FF
-        frac = (inc >> 8) & 0x7FFF
-        s0 = SIN_LUT[idx]
-        s1 = SIN_LUT[(idx + 1) & 1023]
-        sn = s0 + mul_q15(frac, s1 - s0)
-        f = (sn << 1) * 32
-    kmax = 2 << 20
-    return kmax if f > kmax else (1 if f < 1 else f)
-
-
-class CombBank:
-    """The rising comb from comb.h."""
+class OctaveStack:
+    """OctaveStack from octave.h."""
 
     def __init__(self):
-        self.lp = [0] * MAX_LAYERS
-        self.bp = [0] * MAX_LAYERS
+        self.buf = [0] * OCT_LEN
+        self.write = 0
+        self.drift = [0] * MAX_LAYERS
 
-    def process(self, i, x, f):
-        self.lp[i] += mul_q20(f, self.bp[i])
-        hp = x - self.lp[i] - mul_q15(COMB_Q, self.bp[i])
-        self.bp[i] += mul_q20(f, hp)
-        # Normalise by the resonant gain (~32768/q), so an on-centre tone
-        # passes at unity instead of being boosted ~16x.
-        return mul_q15(COMB_Q, self.bp[i])
+    def write_sample(self, x):
+        self.buf[self.write & OCT_MASK] = max(-32768, min(32767, x))
+        self.write = (self.write + 1) & OCT_MASK
 
+    def _tap(self, p):
+        idx = (p >> 16) & OCT_MASK
+        frac = p & 0xFFFF
+        a = self.buf[idx]
+        b = self.buf[(idx + 1) & OCT_MASK]
+        return a + (((b - a) * frac) >> 16)
+
+    def read(self, i, rate_q16):
+        self.drift[i] = (self.drift[i] + rate_q16 - 65536) & 0xFFFFFFFF
+        while self.drift[i] >= (OCT_WIN << 16):
+            self.drift[i] -= (OCT_WIN << 16)
+        p0 = (((self.write - OCT_WIN) << 16) + self.drift[i]) & 0xFFFFFFFF
+        p1 = (p0 + ((OCT_WIN // 2) << 16)) & 0xFFFFFFFF
+        a = self._tap(p0)
+        b = self._tap(p1)
+        u = ((self.drift[i] >> 14) << (32 - 16)) & 0xFFFFFFFF
+        g = hann_q15(u)
+        return mul_q15(a, 32767 - g) + mul_q15(b, g)
 
 
 class Engine:
@@ -187,7 +181,7 @@ class Engine:
 
         self.osc = [0] * MAX_LAYERS
         self.inc = [0] * MAX_LAYERS
-        self.comb_f = [0] * MAX_LAYERS
+        self.oct_rate = [65536] * MAX_LAYERS
         self.win_l = [0] * MAX_LAYERS
         self.win_r = [0] * MAX_LAYERS
 
@@ -197,7 +191,7 @@ class Engine:
         self.active = layers
         self.inv_sqrt = INV_SQRT_N[layers]
         self.prev_master = None
-        self.comb = CombBank()
+        self.octave = OctaveStack()
         self.rate = 0
         self.shift_up = True
 
@@ -241,17 +235,13 @@ class Engine:
             if self.prev_master > 0xC0000000 and self.master_out < 0x40000000:
                 for i in range(len(self.osc) - 1, 0, -1):
                     self.osc[i] = self.osc[i - 1]
-                    self.comb.lp[i] = self.comb.lp[i - 1]
-                    self.comb.bp[i] = self.comb.bp[i - 1]
-                self.comb.lp[0] = 0
-                self.comb.bp[0] = 0
+                    self.octave.drift[i] = self.octave.drift[i - 1]
+                self.octave.drift[0] = 0
             elif self.prev_master < 0x40000000 and self.master_out > 0xC0000000:
                 for i in range(len(self.osc) - 1):
                     self.osc[i] = self.osc[i + 1]
-                    self.comb.lp[i] = self.comb.lp[i + 1]
-                    self.comb.bp[i] = self.comb.bp[i + 1]
-                self.comb.lp[-1] = 0
-                self.comb.bp[-1] = 0
+                    self.octave.drift[i] = self.octave.drift[i + 1]
+                self.octave.drift[-1] = 0
         self.prev_master = self.master_out
 
         # DISCRETE layer count - no fade. Adding a layer respaces the whole
@@ -264,7 +254,10 @@ class Engine:
             if inc > 0x7FFFFFFF:
                 inc = 0x7FFFFFFF
             self.inc[i] = inc
-            self.comb_f[i] = tune_from_inc(inc)
+            centre = i - (n >> 1)
+            r = m >> 14
+            r = (r << centre) if centre >= 0 else (r >> (-centre))
+            self.oct_rate[i] = max(1024, min(OCT_MAX_RATE, r))
             u_l = (md + i * od) & 0xFFFFFFFF
             u_r = (u_l + wd) & 0xFFFFFFFF
             self.win_l[i] = hann_q15(u_l)
@@ -278,7 +271,8 @@ class Engine:
             if (k & 31) == 0:
                 self.update_control()
 
-            comb_in = (audio_in[k] << 6) if audio_in else 0
+            if audio_in and self.source_mix > 0:
+                self.octave.write_sample(audio_in[k] << 5)
 
             acc_l = 0
             acc_r = 0
@@ -290,7 +284,7 @@ class Engine:
 
                 filtered = 0
                 if self.source_mix > 0:
-                    filtered = self.comb.process(i, comb_in, self.comb_f[i])
+                    filtered = self.octave.read(i, self.oct_rate[i])
 
                 v = (mul_q15(synth, 32767 - self.source_mix) +
                      mul_q15(filtered, self.source_mix))

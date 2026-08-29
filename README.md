@@ -39,9 +39,9 @@ siren rather than the illusion.
 The card does this two ways at once, and Y crossfades between them:
 
 - **Internal voice** — a bank of 3 to 12 sine oscillators.
-- **Live audio** — a rising comb filter: narrow resonant bands on the same
-  octave-spaced frequencies as the oscillators, sweeping upward forever
-  through whatever is patched into Audio In 1.
+- **Live audio** — your signal, octave-stacked: every partial transposed into
+  the same octave-spaced layers as the oscillators, gliding forever through
+  the same window.
 
 ## What to feed it
 
@@ -104,42 +104,28 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 | CV Out 1 | Master phase, a 0–5 V ramp — one cycle per octave |
 | CV Out 2 | Measured DSP load |
 
-## The rising comb
+## The octave stack
 
-The live path is **N narrow resonant bandpasses** centred on exactly the same
-octave-spaced frequencies as the oscillator bank, weighted by exactly the same
-window. As the master phase glides, every band centre slides upward together —
-fading in at the bottom, out at the top — so the input is filtered by a comb
-that rises forever.
+The live path transposes whatever is patched into Audio In 1 into **N
+octave-spaced copies**, weighted by the same window as the oscillator bank. A
+220 Hz partial appears at 55, 110, 220 and 440 Hz — and each copy rises and
+fades exactly as an oscillator layer does.
 
-Because the band centres and the oscillator frequencies are the same numbers,
-the two sources sit on top of each other rather than beating, and Y crossfades
-between "the illusion played by sine tones" and "the illusion applied to your
-signal".
+That is the point: the internal voice is octave-stacked sines, and this is
+octave-stacked *you*. Your source doesn't have an effect applied over it; it
+becomes the illusion.
 
-Feed it something with broadband content — noise, a pad, cymbals, a full mix.
-The comb needs energy across the spectrum to have something to find. A single
-sine will simply come and go as a band sweeps past it.
+Feed it anything with clear pitch content — a voice, a synth line, a drone, a
+chord. Percussion works too but the transposed copies smear, since each read
+head spans a 341 ms window.
 
-The bands are deliberately **broad** (Q ≈ 4). A narrower comb sounds more
-dramatic standing still, but this one *moves* — and a narrow band passes a
-fixed partial only while its centre is within a bandwidth of it, so at high Q a
-sustained note appears abruptly, sounds briefly and vanishes. At Q ≈ 4 a tone
-stays audible for most of the octave and the envelope you hear is the window's
-own fade, which is what makes it read as a rising filter rather than a set of
-tuned blips.
-
-Band outputs are normalised by their own resonant gain, so a partial landing on
-a centre passes at unity rather than being boosted — without that the path
-clipped hard on anything tonal.
-
-**This replaced a Hilbert frequency shifter**, which was the original design.
-A shifter moves every partial by the same number of *hertz* rather than the
-same *ratio*, so it broke the harmonic series and made the input
-unrecognisable — the relationship between what went in and what came out was
-inaudible. A comb keeps the source recognisable and applies the illusion to
-it, which is what "Shepard tones on live audio" should mean. It is also
-cheaper.
+Two earlier designs were tried and rejected, and the reason is the same for
+both: they treated the input as something to *process* while the structure
+moved past it. A **frequency shifter** moved every partial by the same hertz,
+breaking the harmonic series and making the source unrecognisable. A **rising
+comb filter** swept resonant bands across the input, so any given partial was
+only heard while a band happened to cross it — it came and went rather than
+participating in the glide.
 
 ## Stepped modes
 

@@ -1,6 +1,6 @@
 draft: true
 Name: SHEPARD
-Description: "DRAFT (on hardware, still being shaken out): an infinite glissando — Shepard-Risset tones that rise or fall forever, as sine tones or as a rising comb filter on live audio"
+Description: "DRAFT (on hardware, still being shaken out): an infinite glissando — Shepard-Risset tones that rise or fall forever, as sine tones or by octave-stacking live audio"
 Language: C++ (ComputerCard)
 Creator: Andy Jenkinson (uglifruit)
 Version: "0.1.0"
@@ -47,18 +47,15 @@ summary: |
   Main sets speed and direction, with a deadzone at noon so the stationary
   position can be found by feel — anticlockwise descends, clockwise ascends, and
   CV In 1 is summed in. X sets density, 3 to 12 octave layers, stepped discretely with hysteresis so knob jitter cannot retrigger a change. Y crossfades
-  between two sources: the internal sine bank, and a RISING COMB FILTER applied
-  to whatever is patched into Audio In 1.<br><br>
+  between two sources: the internal sine bank, and your own signal
+  OCTAVE-STACKED.<br><br>
 
-  The comb is N narrow resonant bandpasses centred on exactly the same
-  octave-spaced frequencies as the oscillators and weighted by exactly the same
-  window, so as the master phase glides every band centre sweeps upward
-  together - fading in at the bottom and out at the top. Because the centres and
-  the oscillator frequencies are the same numbers, the two sources sit on top of
-  each other rather than beating, and Y crossfades between the illusion played
-  by sine tones and the illusion applied to your signal. Feed it broadband
-  material - noise, pads, cymbals, a full mix - since the comb needs energy
-  across the spectrum to find.<br><br>
+  The live path transposes whatever is patched into Audio In 1 into N
+  octave-spaced copies, weighted by the same window as the oscillators - so a
+  220 Hz partial appears at 55, 110, 220 and 440 Hz and each copy rises and
+  fades exactly as an oscillator layer does. The internal voice is
+  octave-stacked sines; this is octave-stacked you. Feed it anything with clear
+  pitch content.<br><br>
 
   Switch Up is page two: Main quantises the glide to smooth glissando, 12-ET
   chromatic, major or pentatonic; X sets stereo width; Y sets output level.
@@ -85,9 +82,9 @@ summary: |
   against a 20.8us per-sample budget. Two economies make a twelve-layer stereo
   bank affordable — because the layers are exactly an octave apart every layer's
   increment is layer 0's shifted left by i, so ONE exponential lookup serves all
-  twelve at 1.5kHz rather than 48kHz; and the comb's filters are shared between
-  channels, since the stereo image comes from the window weighting rather than
-  from the filtering. The envelope reuses the first half of
+  twelve at 1.5kHz rather than 48kHz; and the octave stack's read heads share
+  one delay buffer with the alt-boot SPIRAL delay, since the two modes never
+  run at the same time. The envelope reuses the first half of
   the sine table rather than needing one of its own, and sums to exactly N/2 at
   every layer count and phase.<br><br>
 
@@ -113,10 +110,9 @@ panel:
       name: In
       type: audio
       description: >
-        Source for the rising comb filter, and for the SPIRAL delay. Wants
-        broadband content - noise, pads, cymbals, a whole mix - since the comb
-        needs energy across the spectrum to find. A single sine simply comes
-        and goes as a band sweeps past it.
+        Source for the octave stack, and for the SPIRAL delay. Wants clear
+        pitch content - a voice, a synth line, a drone, a chord. Percussion
+        works but smears, since each read head spans a 341 ms window.
     - id: CVIn1
       name: Speed
       type: cv
@@ -188,8 +184,8 @@ controls:
       y:
         name: SOURCE
         description: >
-          Crossfades from the internal sine bank (anticlockwise) to the rising
-          comb filter on live audio (clockwise).
+          Crossfades from the internal sine bank (anticlockwise) to the
+          octave-stacked live input (clockwise).
     - when: Switch Up (page 2), normal boot
       main:
         name: QUANTISE

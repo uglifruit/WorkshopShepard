@@ -39,7 +39,7 @@
 
 #include "fixed.h"
 #include "shepard.h"
-#include "comb.h"
+#include "octave.h"
 #include "spiral.h"
 
 using namespace shepard;
@@ -127,11 +127,17 @@ static constexpr int32_t kRateHigh = 2600;
 // As a Q32 phase increment at 48 kHz: 13.75 / 48000 * 2^32.
 static constexpr uint32_t kBaseInc = 1229782u;
 
+// Shared delay buffer, 128 KB. SPIRAL (alt-boot) and the octave stack
+// (normal boot) are mutually exclusive, so one allocation serves both.
+//
+// A plain global in a .cpp, deliberately - see the table note in shepard.h.
+int16_t g_delay_buf[kSpiralLen];
+
 class ShepardCard : public ComputerCard {
  public:
   ShepardCard() {
-    comb_.Init();
-    spiral_.Init();
+    octave_.Init(g_delay_buf);
+    spiral_.Init(g_delay_buf);
 
     boot_mute_ = kBootMute;
     page_ = 0;
@@ -276,21 +282,17 @@ class ShepardCard : public ComputerCard {
     int32_t acc_l = 0;
     int32_t acc_r = 0;
 
-    // The live-audio path is a RISING COMB: N narrow resonant bandpasses on
-    // the same octave-spaced centres as the oscillators, weighted by the same
-    // window. See comb.h for why this replaced a frequency shifter.
-    //
-    // << 6, measured against the worst case: a full-scale tone sitting on a
-    // band centre while the stack glides across octave wraps. That gives a
-    // peak of 1368 against the 1450 soft knee - zero clipping - with a drone
-    // landing at rms 295 against the synth voice's 443.
-    //
-    // Note this is the same figure that distorted badly BEFORE the resonator
-    // state was rotated at the wrap (see comb.h). The gain was never the real
-    // fault: a charged resonator being retuned an octave was, and it rang out
-    // at 39x the rail. Fixing the level alone would have traded a loud fault
-    // for a quiet one.
-    const int32_t in = sealed_ ? 0 : ((int32_t)AudioIn1() << 6);
+    // The live-audio path OCTAVE-STACKS the input: N read heads on one delay
+    // line at 2^i the write rate, so every partial of the source is transposed
+    // into N octave-spaced copies and glides through the same window as the
+    // oscillators. See octave.h.
+    if (source_mix_ > 0) {
+      // << 5 measured: rms 308-358 across noise, drone and chord against the
+      // synth voice's 443, with ~4 dB of headroom and no clipping on any of
+      // them. Unlike the comb this path's level barely depends on source type,
+      // because it transposes rather than resonates.
+      octave_.Write(sealed_ ? 0 : ((int32_t)AudioIn1() << 5));
+    }
 
     for (int i = 0; i < active_layers_; ++i) {
       // --- internal voice ---
@@ -300,13 +302,12 @@ class ShepardCard : public ComputerCard {
         synth = SinQ15(osc_q32_[i]);
       }
 
-      // --- live audio, band-filtered ---
-      // This band's centre IS this layer's oscillator frequency, so the comb
-      // tooth and the sine sit exactly together: the two sources reinforce
-      // rather than beating against each other.
+      // --- live audio, octave-shifted ---
+      // This head's shift ratio matches this layer's oscillator interval, so
+      // the transposed copy of the input lands exactly where the sine does.
       int32_t filtered = 0;
       if (source_mix_ > 0) {
-        filtered = comb_.Process(i, in, comb_f_[i]);
+        filtered = octave_.Read(i, oct_rate_[i]);
       }
 
       // Crossfade the two sources, then apply this layer's window gain.
@@ -571,15 +572,15 @@ class ShepardCard : public ComputerCard {
       if (prev_master_q32_ > 0xC0000000u && master_out_q32_ < 0x40000000u) {
         // ascending: the pattern shifts up in index
         for (int i = kMaxLayers - 1; i > 0; --i) osc_q32_[i] = osc_q32_[i - 1];
-        // The comb's resonator state must rotate WITH it - see comb.h. A
-        // charged resonator retuned an octave rings out at its old centre,
-        // which was the loud phasy tone arriving once per octave.
-        comb_.RotateUp();
+        // The octave stack's read positions must rotate WITH it - see
+        // octave.h. A head that keeps its position while inheriting a
+        // different shift ratio jumps in the buffer - a click per octave.
+        octave_.RotateUp();
       } else if (prev_master_q32_ < 0x40000000u &&
                  master_out_q32_ > 0xC0000000u) {
         // descending
         for (int i = 0; i < kMaxLayers - 1; ++i) osc_q32_[i] = osc_q32_[i + 1];
-        comb_.RotateDown();
+        octave_.RotateDown();
       }
     }
     prev_master_q32_ = master_out_q32_;
@@ -606,7 +607,18 @@ class ShepardCard : public ComputerCard {
       if (inc > 0x7FFFFFFFu) inc = 0x7FFFFFFFu;
       inc_[i] = inc;
 
-      comb_f_[i] = CombBank::TuneFromInc(inc);
+      // Shift ratio for this layer: 2^(master + i - N/2), CENTRED so the
+      // rates straddle unity rather than running from 1x upward. Heads reading
+      // slower than the write pointer drift slowly, which halves the worst
+      // recycle rate - see octave.h.
+      {
+        const int32_t centre = i - (layers_ >> 1);
+        uint32_t r = (uint32_t)(m >> 14);           // 2^frac in Q16
+        if (centre >= 0) r <<= centre; else r >>= (-centre);
+        if (r > kOctMaxRate) r = kOctMaxRate;
+        if (r < 1024u) r = 1024u;
+        oct_rate_[i] = r;
+      }
 
       // Window position: u_i = (master_frac + i) / layers.
       //
@@ -851,7 +863,7 @@ class ShepardCard : public ComputerCard {
     }
   }
 
-  CombBank comb_;
+  OctaveStack octave_;
   SpiralDelay spiral_;
 
   int32_t boot_mute_;
@@ -875,7 +887,7 @@ class ShepardCard : public ComputerCard {
   // Oscillator bank state.
   uint32_t osc_q32_[kMaxLayers];
   uint32_t inc_[kMaxLayers];
-  int32_t comb_f_[kMaxLayers];
+  uint32_t oct_rate_[kMaxLayers];
   int16_t win_l_[kMaxLayers];
   int16_t win_r_[kMaxLayers];
 
