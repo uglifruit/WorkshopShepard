@@ -213,17 +213,38 @@ controls:
         description: >
           Output level. Holds its current value until the knob is actually
           moved, so changing page never drops the volume.
+    - when: Switch Middle (page 1), PING alt-boot
+      main:
+        name: POLE SPEED
+        description: >
+          How fast the invisible climb moves between strikes, and which way.
+          The pole is silent here - this sets how far apart in pitch
+          consecutive pings land.
+      x:
+        name: DENSITY
+        description: 3 to 12 octave layers in each strike.
+      y:
+        name: SOURCE
+        description: >
+          Internal sines anticlockwise, your own input octave-stacked and
+          gated by the ping envelope clockwise.
     - when: Switch Up (page 2), PING alt-boot
       main:
         name: QUANTISE
         description: >
-          As in normal boot, so the strikes land on a scale - one of the most
-          playable things about this mode.
+          Smooth, 12-ET, major, minor or pentatonic - as in normal boot, so
+          strikes land on scale degrees rather than anywhere on the glide.
+          One of the most playable things about this mode.
       x:
         name: DECAY
         description: >
           How long each ping rings, from a 17ms click to a 1.7s bell. Stereo
           width has no knob in PING and sits at a fixed modest spread.
+      y:
+        name: LEVEL
+        description: >
+          Output level. Worth having here because polyphony makes the level
+          vary between a single strike and four overlapping ones.
 
   leds:
     - when: Normal running

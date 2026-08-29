@@ -181,16 +181,29 @@ structure. Because the pole wraps every octave, the pitches available are
 endless but bounded — the barber's pole becomes something you play rather than
 something you listen to.
 
+### Switch MIDDLE — page 1
+
 | Knob | Function |
 |---|---|
-| Main (page 1) | Pole speed — how fast the invisible climb moves between strikes |
-| X (page 1) | Density |
-| Y (page 1) | Source mix |
-| Main (page 2) | Quantise — as in normal boot, so strikes land on a scale |
-| **X (page 2)** | **Ping decay** — 17 ms click to a 1.7 s ring |
+| **Main** | **Pole speed** — how fast the invisible climb moves between strikes, and which way |
+| **X** | **Density** — 3 to 12 layers in each strike |
+| **Y** | **Source** — internal sines anticlockwise, your own input octave-stacked clockwise |
 
-Stereo width has no knob in PING (page 2 X is the decay), and sits at a fixed
-modest spread.
+### Switch UP — page 2
+
+| Knob | Function |
+|---|---|
+| **Main** | **Quantise** — smooth, 12-ET, major, minor, pentatonic. Strikes land on scale degrees rather than anywhere on the glide |
+| **X** | **Ping decay** — 17 ms click to a 1.7 s ring |
+| **Y** | **Output level** |
+
+Page 1 is identical to normal boot. On page 2 only X differs: it is decay here
+rather than stereo width, and width sits at a fixed modest spread.
+
+**Knobs use pickup across a page change** — arriving on a page, each knob holds
+its previous value until moved about 4°, and its LED pulses until it does. Page
+2 starts at smooth / shortest decay / full level, so on the first visit the
+decay knob does nothing until you nudge X.
 
 Four voices, oldest stolen when all are busy, so the newest four strikes are
 always the ones sounding.
