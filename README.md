@@ -78,7 +78,7 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 
 | Knob | Function |
 |---|---|
-| **Main** | **Quantise** — smooth glissando, 12-ET chromatic, major, or pentatonic. |
+| **Main** | **Quantise** — smooth glissando, 12-ET chromatic, major, minor, or pentatonic. In a rising glide the chromatic scale is nearly indistinguishable from smooth; the modal settings are what change the character. |
 | **X** | **Stereo width.** |
 | **Y** | **Output level.** Holds its current value until actually moved, so changing page never drops the volume. |
 
@@ -103,6 +103,7 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 | Audio Out 1 / 2 | Stereo output |
 | CV Out 1 | Master phase, a 0–5 V ramp — one cycle per octave |
 | CV Out 2 | Measured DSP load |
+| Pulse Out 1 | One trigger per octave wrap — the card's own clock, locked to the glide |
 
 ## The octave stack
 
@@ -145,6 +146,11 @@ not itself a click.
 Pulse In 1 advances one degree. Glide and stepping work together: park Main at
 centre for pure manual stepping, or leave it off-centre and the pulses nudge an
 already-moving glide.
+
+**Pulse Out 1 fires once per octave wrap.** Self-patch it to Pulse In 1 and the
+card advances a scale step every time the stack completes a cycle; or use it to
+clock something else in time with the illusion. At a slow glide that is a pulse
+every few seconds, at full speed about eight per second.
 
 ## Reading the DSP load
 

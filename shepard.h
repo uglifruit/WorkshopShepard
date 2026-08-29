@@ -160,14 +160,16 @@ extern const int16_t kInvSqrtN[];   // [kMaxLayers + 1]
 // above. (WorkshopSpectral's kSmoothLut is the precedent.)
 extern const uint32_t kScale12[];    // [12] chromatic, 12-ET
 extern const uint32_t kScaleMaj[];   // [7]  major
+extern const uint32_t kScaleMin[];   // [7]  natural minor
 extern const uint32_t kScalePent[];  // [5]  major pentatonic
 
 enum Scale {
   kScaleSmooth = 0,   // no quantisation - continuous glissando
   kScaleChromatic = 1,
   kScaleMajor = 2,
-  kScalePentatonic = 3,
-  kScaleCount = 4
+  kScaleMinor = 3,
+  kScalePentatonic = 4,
+  kScaleCount = 5
 };
 
 // Snap a Q32 octave position to the nearest degree of a scale.

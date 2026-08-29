@@ -26,7 +26,7 @@ import sys
 
 OCT = 1 << 32
 
-SCALE_SMOOTH, SCALE_CHROMATIC, SCALE_MAJOR, SCALE_PENT = 0, 1, 2, 3
+SCALE_SMOOTH, SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT = 0, 1, 2, 3, 4
 
 SCALE12 = [0x00000000, 0x15555555, 0x2AAAAAAB, 0x40000000,
            0x55555555, 0x6AAAAAAB, 0x80000000, 0x95555555,
@@ -35,16 +35,21 @@ SCALE12 = [0x00000000, 0x15555555, 0x2AAAAAAB, 0x40000000,
 SCALE_MAJ = [0x00000000, 0x2AAAAAAB, 0x55555555, 0x6AAAAAAB,
              0x95555555, 0xC0000000, 0xEAAAAAAB]
 
+SCALE_MIN_T = [0x00000000, 0x2AAAAAAB, 0x40000000, 0x6AAAAAAB,
+               0x95555555, 0xAAAAAAAB, 0xD5555555]
+
 SCALE_PENT_T = [0x00000000, 0x2AAAAAAB, 0x55555555, 0x95555555, 0xC0000000]
 
 TABLES = {SCALE_CHROMATIC: SCALE12, SCALE_MAJOR: SCALE_MAJ,
-          SCALE_PENT: SCALE_PENT_T}
+          SCALE_MINOR: SCALE_MIN_T, SCALE_PENT: SCALE_PENT_T}
 
-NAMES = {SCALE_CHROMATIC: "12-ET", SCALE_MAJOR: "major", SCALE_PENT: "pentatonic"}
+NAMES = {SCALE_CHROMATIC: "12-ET", SCALE_MAJOR: "major",
+         SCALE_MINOR: "minor", SCALE_PENT: "pentatonic"}
 
 EXPECT_CENTS = {
     SCALE_CHROMATIC: [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100],
     SCALE_MAJOR: [0, 200, 400, 500, 700, 900, 1100],
+    SCALE_MINOR: [0, 200, 300, 500, 700, 800, 1000],
     SCALE_PENT: [0, 200, 400, 700, 900],
 }
 
@@ -122,7 +127,7 @@ def check_wrap():
     """
     print("  nearest degree across the octave wrap:")
     ok = True
-    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_PENT):
+    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT):
         tab = TABLES[scale]
         bad = 0
         worst_err = 0.0
@@ -194,7 +199,7 @@ def check_stepping():
     """Manual stepping must be monotonic and must never skip a degree."""
     print("  Pulse In 1 manual stepping:")
     ok = True
-    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_PENT):
+    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT):
         tab = TABLES[scale]
         n = len(tab)
 

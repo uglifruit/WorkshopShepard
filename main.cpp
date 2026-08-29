@@ -75,6 +75,11 @@ static constexpr int32_t kLongPress = 96000;    // 2 s
 // hands page 1 the knob positions meant for page 2. Audible as a lurch.
 static constexpr int32_t kPageSettle = 576;     // 12 ms
 
+// Width of the octave-wrap trigger on Pulse Out 1, in samples. 5 ms is well
+// above any gate-input threshold and far below the gap between wraps even at
+// the top glide speed (125 ms).
+static constexpr int32_t kWrapPulseLen = 240;
+
 // Control-rate divider. The pow2 lookup, window weights and quantisation run
 // once per 32 samples (1.5 kHz). Worst-case pitch drift within a block is
 // 1.6 cents at the fastest glide - inaudible, and it is a smooth staleness
@@ -257,6 +262,20 @@ class ShepardCard : public ComputerCard {
     // card's clock - patch it to watch the glide, or to drive something else
     // in step with it.
     CVOut1((int16_t)((int32_t)(master_out_q32_ >> 21) - 2048));
+
+    // Pulse Out 1: one trigger per octave wrap - the card's own clock, locked
+    // to the glide. Self-patch it to Pulse In 1 to advance a scale step every
+    // octave, or use it to clock something else in time with the illusion.
+    //
+    // Counted down in samples rather than held by a flag, so the width is
+    // fixed regardless of glide speed. At 8 oct/s the wraps are 125 ms apart,
+    // so a 5 ms pulse still has ample gap.
+    if (wrap_pulse_ > 0) {
+      --wrap_pulse_;
+      PulseOut1(true);
+    } else {
+      PulseOut1(false);
+    }
 
     // CV 2: measured DSP load, as a fraction of the per-sample budget. Full
     // scale = the ISR exactly filling its 20.83 us.
@@ -570,6 +589,7 @@ class ShepardCard : public ComputerCard {
     // Costs 11 word moves per octave, at control rate.
     if (prev_master_valid_) {
       if (prev_master_q32_ > 0xC0000000u && master_out_q32_ < 0x40000000u) {
+        wrap_pulse_ = kWrapPulseLen;      // Pulse Out 1: once per octave
         // ascending: the pattern shifts up in index
         for (int i = kMaxLayers - 1; i > 0; --i) osc_q32_[i] = osc_q32_[i - 1];
         // The octave stack's read positions must rotate WITH it - see
@@ -578,6 +598,7 @@ class ShepardCard : public ComputerCard {
         octave_.RotateUp();
       } else if (prev_master_q32_ < 0x40000000u &&
                  master_out_q32_ > 0xC0000000u) {
+        wrap_pulse_ = kWrapPulseLen;
         // descending
         for (int i = 0; i < kMaxLayers - 1; ++i) osc_q32_[i] = osc_q32_[i + 1];
         octave_.RotateDown();
@@ -893,6 +914,7 @@ class ShepardCard : public ComputerCard {
 
   uint32_t prev_master_q32_ = 0;   // for octave-wrap detection
   bool prev_master_valid_ = false;
+  int32_t wrap_pulse_ = 0;
   uint32_t master_div_ = 0;      // master_out_q32_ / layers
   uint32_t oct_div_ = 0;         // 2^32 / layers
   uint32_t width_div_ = 0;       // stereo width offset / layers

@@ -58,6 +58,19 @@ const uint32_t kScaleMaj[7] = {
   0xEAAAAAABu,   // 1100
 };
 
+// Natural minor. Worth having as a distinct option: in a RISING glide a
+// chromatic scale is nearly indistinguishable from smooth, so the modal
+// choices are what actually change the character.
+const uint32_t kScaleMin[7] = {
+  0x00000000u,   //    0
+  0x2AAAAAABu,   //  200
+  0x40000000u,   //  300
+  0x6AAAAAABu,   //  500
+  0x95555555u,   //  700
+  0xAAAAAAABu,   //  800
+  0xD5555555u,   // 1000
+};
+
 const uint32_t kScalePent[5] = {
   0x00000000u,   //    0
   0x2AAAAAABu,   //  200
@@ -72,12 +85,14 @@ static const uint32_t* const kScaleTable[kScaleCount] = {
   kScale12,      // unused for kScaleSmooth, present to keep indexing simple
   kScale12,
   kScaleMaj,
+  kScaleMin,
   kScalePent,
 };
 
 static const int kScaleLen[kScaleCount] = {
   12,   // unused
   12,
+  7,
   7,
   5,
 };

@@ -58,7 +58,7 @@ summary: |
   pitch content.<br><br>
 
   Switch Up is page two: Main quantises the glide to smooth glissando, 12-ET
-  chromatic, major or pentatonic; X sets stereo width; Y sets output level.
+  chromatic, major, minor or pentatonic; X sets stereo width; Y sets output level.
   Snapping is slewed over about 1.4 ms rather than jumped, because twelve
   oscillators stepping together is audible as a thump.<br><br>
 
@@ -156,6 +156,13 @@ panel:
       description: >
         Master glide position as a 0-5V ramp, one full cycle per octave. Patch
         it to watch the glide, or to drive something else in step with it.
+    - id: PulseOut1
+      name: Octave
+      type: pulse
+      description: >
+        One trigger per octave wrap - the card's own clock, locked to the
+        glide. Self-patch it to Pulse In 1 to advance a scale step every cycle,
+        or use it to clock something else in time with the illusion.
     - id: CVOut2
       name: DSP Load
       type: cv
@@ -190,7 +197,9 @@ controls:
       main:
         name: QUANTISE
         description: >
-          Smooth glissando, 12-ET chromatic, major, or pentatonic. Steps are
+          Smooth glissando, 12-ET chromatic, major, minor or pentatonic. In a
+          rising glide the chromatic setting is nearly indistinguishable from
+          smooth; the modal ones are what change the character. Steps are
           slewed over about 1.4ms rather than snapped.
       x:
         name: WIDTH
