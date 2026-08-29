@@ -46,7 +46,7 @@ summary: |
 
   Main sets speed and direction, with a deadzone at noon so the stationary
   position can be found by feel — anticlockwise descends, clockwise ascends, and
-  CV In 1 is summed in. X sets density, 3 to 12 octave layers, each new layer slewed in over about 5 ms rather than switched on. Y crossfades
+  CV In 1 is summed in. X sets density, 3 to 12 octave layers, stepped discretely with hysteresis so knob jitter cannot retrigger a change. Y crossfades
   between two sources: the internal sine bank, and a Hilbert frequency shifter
   that drags whatever is patched into Audio In 1 through the same structure.<br><br>
 

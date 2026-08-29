@@ -65,7 +65,7 @@ is a button, not a third page.
 | Knob | Function |
 |---|---|
 | **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. About 85% of the travel sits inside the illusion (46 s down to 1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
-| **X** | **Density** — 3 to 12 octave layers, with each new layer slewed in over about 5 ms rather than switched on. Summed with CV In 2. |
+| **X** | **Density** — 3 to 12 octave layers, stepped discretely with hysteresis. Adding a layer respaces the whole stack, so the change is audible by nature; the output level is slewed across it rather than stepping too. Summed with CV In 2. |
 | **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
 
 ### Switch UP — page 2

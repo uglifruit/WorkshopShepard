@@ -193,7 +193,7 @@ class Engine:
         self.master_out = 0
         self.win_phase = 0
         self.active = layers
-        self.entry_gain = 0
+        self.inv_sqrt = INV_SQRT_N[layers]
         self.prev_master = None
         self.hilbert = Hilbert()
         self.rate = 0
@@ -245,14 +245,10 @@ class Engine:
                     self.osc[i] = self.osc[i + 1]
         self.prev_master = self.master_out
 
-        # The newest layer is SLEWED in, and the layout stays an exact
-        # integer one. Crossfading the N and N+1 LAYOUTS keeps the window sum
-        # flat but the two rotate differently at an octave wrap, so mid-fade
-        # the stack cannot rotate cleanly - measured 123 vs 5. See the note in
-        # UpdateControl().
-        target = 32767 if self.layer_frac > 0 else 0
-        self.entry_gain += (target - self.entry_gain) >> 3
-        self.active = n + (1 if (self.entry_gain > 0 and n < MAX_LAYERS) else 0)
+        # DISCRETE layer count - no fade. Adding a layer respaces the whole
+        # stack (N is the window divisor), so there is no "entering layer" to
+        # fade; both attempts to do so made things worse. See UpdateControl().
+        self.active = n
 
         for i in range(self.active):
             inc = (inc0 << i) & 0xFFFFFFFF
@@ -262,12 +258,8 @@ class Engine:
             self.mod_inc[i] = (shift_base << i) & 0xFFFFFFFF
             u_l = (md + i * od) & 0xFFFFFFFF
             u_r = (u_l + wd) & 0xFFFFFFFF
-            w_l, w_r = hann_q15(u_l), hann_q15(u_r)
-            if i == n:
-                w_l = mul_q15(w_l, self.entry_gain)
-                w_r = mul_q15(w_r, self.entry_gain)
-            self.win_l[i] = w_l
-            self.win_r[i] = w_r
+            self.win_l[i] = hann_q15(u_l)
+            self.win_r[i] = hann_q15(u_r)
 
     def render(self, n_samples, audio_in=None):
         """Returns (left, right) lists of int16-range samples."""
@@ -303,9 +295,8 @@ class Engine:
                 acc_l += mul_q15(v, self.win_l[i])
                 acc_r += mul_q15(v, self.win_r[i])
 
-            a = INV_SQRT_N[self.layers]
-            b = INV_SQRT_N[min(self.layers + 1, MAX_LAYERS)]
-            g = a + mul_q15(self.entry_gain, b - a)
+            self.inv_sqrt += (INV_SQRT_N[self.layers] - self.inv_sqrt) >> 5
+            g = self.inv_sqrt
             left.append(soft_clip_out(mul_q15(acc_l, g) >> 5))
             right.append(soft_clip_out(mul_q15(acc_r, g) >> 5))
         return left, right

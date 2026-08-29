@@ -354,45 +354,55 @@ class ShepardCard : public ComputerCard {
 
   // --- control rate --------------------------------------------------------
   void __not_in_flash_func(UpdateControl)() {
-    // Layer count from X, 3..12, with the NEWEST layer slewed in rather than
-    // switched on. Integer layouts only.
+    // Layer count from X, 3..12. DISCRETE, with hysteresis.
     //
-    // Two earlier attempts are worth recording, because the second looked
-    // right and was not:
+    // Two attempts were made to fade a new layer in, and both were chasing
+    // something that does not exist:
     //
-    //   1. Integer count, no fade. A new oscillator appeared at its full
-    //      window gain the instant the count incremented - nine audible jumps
-    //      across the knob.
+    //   1. Crossfading the N-layer and (N+1)-layer LAYOUTS. Keeps the window
+    //      sum flat at every fractional position (0.0000% ripple, verified),
+    //      but the two layouts ROTATE DIFFERENTLY at an octave wrap, so
+    //      mid-blend the stack cannot rotate cleanly. Measured 123 sample step
+    //      mid-fade against 5 at either end.
     //
-    //   2. Crossfading the N-layer and (N+1)-layer LAYOUTS. The window sum
-    //      stays perfectly flat at every fractional position (0.0000% ripple,
-    //      verified), so this looked correct - but the two layouts ROTATE
-    //      DIFFERENTLY at an octave wrap, so mid-blend the stack cannot rotate
-    //      cleanly and the top slot's energy is discarded every octave.
-    //      Measured: largest sample step 123 mid-fade against 5 at either end.
-    //      Heard as "the new layer popping in VERY notably".
+    //   2. Appending a slot and slewing its gain. The appended layer sits at
+    //      u = (master + n)/n, which wraps to master/n - the SAME position as
+    //      layer 0. So it was not a quiet new layer at the edge of the window;
+    //      it was a DUPLICATE of layer 0 at up to 0.74 gain, faded in on top.
+    //      Heard as "very audible when it introduces a new layer, especially
+    //      descending - it's not fading in at all".
     //
-    // So: keep the layout an exact integer one, which rotates cleanly, and
-    // ramp the newest layer's gain with a slew that has nothing to do with the
-    // wrap. The window decides WHERE the layer sits; entry_gain_ decides how
-    // much of it is heard.
-    // CV In 2 offsets DENSITY, bipolar, exactly as CV In 1 offsets speed.
-    // CVIn is +-2048; << 4 spans the full Q15 knob range from a +-5V input.
+    // The reason both fail is structural: N appears in the window DIVISOR, so
+    // changing it RESPACES every layer at once. Going 3 -> 4 moves all three
+    // existing layers as well as adding one. There is no "entering layer" to
+    // fade, and a worst-case per-layer gain change of 0.63 is unavoidable.
+    //
+    // So the step is accepted and made RARE and PREDICTABLE instead. Hysteresis
+    // means ADC jitter at a boundary cannot retrigger it - without that the
+    // count flickers between N and N+1 every control block, which is far worse
+    // than one clean step when the knob is actually moved.
     int32_t density = stored_[0][1];
     if (Connected(Input::CV2)) density += (int32_t)CVIn2() << 4;
     density = ClampQ15(density);
 
-    const int32_t span = density * (kMaxLayers - kMinLayers);        // Q15 * 9
-    layers_ = kMinLayers + (span >> 15);
-    const int32_t frac = span & 0x7FFF;
-    if (layers_ < kMinLayers) layers_ = kMinLayers;
-    if (layers_ > kMaxLayers) layers_ = kMaxLayers;
+    {
+      const int32_t kStep = 32768 / (kMaxLayers - kMinLayers + 1);  // ~3277
+      const int32_t kHyst = kStep / 6;      // ~16% of a step, well past jitter
+      int32_t want = kMinLayers + (density / kStep);
+      if (want < kMinLayers) want = kMinLayers;
+      if (want > kMaxLayers) want = kMaxLayers;
 
-    // Target: fully in once X has crossed the boundary, silent below it.
-    // >> 3 per control block is ~5 ms - fast enough to track the knob, slow
-    // enough that ADC jitter at a boundary cannot click.
-    const int32_t entry_target = (layers_ < kMaxLayers && frac > 0) ? 32767 : 0;
-    entry_gain_ += (entry_target - entry_gain_) >> 3;
+      // Only move when the knob is clear of the boundary it last crossed.
+      if (want != layers_) {
+        const int32_t boundary = (want > layers_ ? want : layers_ + 1)
+                                 - kMinLayers;
+        const int32_t edge = boundary * kStep;
+        if ((want > layers_ && density > edge + kHyst) ||
+            (want < layers_ && density < edge - kHyst)) {
+          layers_ = want;
+        }
+      }
+    }
 
     source_mix_ = ClampQ15(stored_[0][2]);
 
@@ -576,14 +586,15 @@ class ShepardCard : public ComputerCard {
 
     // While fading in, the (N+1)th layer must be computed too - it enters at
     // gain 0 in the N layout and rises as the blend moves toward N+1.
-    active_layers_ = layers_ + ((entry_gain_ > 0 && layers_ < kMaxLayers) ? 1 : 0);
+    active_layers_ = layers_;
 
-    // 1/sqrt(N) follows the SLEWED gain, not the raw knob, so the level is
-    // continuous with the layer that is actually sounding.
+    // 1/sqrt(N) is slewed rather than stepped, so the LEVEL does not jump at
+    // the same instant the layout does. The layout step is unavoidable; the
+    // level step is not, and two simultaneous discontinuities read as much
+    // worse than one.
     {
-      const int32_t a = kInvSqrtN[layers_];
-      const int32_t b = kInvSqrtN[layers_ < kMaxLayers ? layers_ + 1 : layers_];
-      inv_sqrt_n_ = a + MulQ15(entry_gain_, b - a);
+      const int32_t target = kInvSqrtN[layers_];
+      inv_sqrt_n_ += (target - inv_sqrt_n_) >> 5;   // ~20 ms
     }
 
     for (int i = 0; i < active_layers_; ++i) {
@@ -617,14 +628,8 @@ class ShepardCard : public ComputerCard {
       const uint32_t u_l = master_div_ + (uint32_t)i * oct_div_;
       const uint32_t u_r = u_l + width_div_;
 
-      int32_t w_l = HannQ15(u_l);
-      int32_t w_r = HannQ15(u_r);
-      if (i == layers_) {          // the layer currently entering
-        w_l = MulQ15(w_l, entry_gain_);
-        w_r = MulQ15(w_r, entry_gain_);
-      }
-      win_l_[i] = (int16_t)w_l;
-      win_r_[i] = (int16_t)w_r;
+      win_l_[i] = (int16_t)HannQ15(u_l);
+      win_r_[i] = (int16_t)HannQ15(u_r);
     }
   }
 
@@ -858,7 +863,6 @@ class ShepardCard : public ComputerCard {
   int32_t rate_q32_ = 0;
   int layers_ = 6;
   int active_layers_ = 6;   // layers_ + 1 while a new layer is fading in
-  int32_t entry_gain_ = 0;  // Q15 slewed gain of the entering layer
   int32_t inv_sqrt_n_ = 13377;
   int scale_ = 0;
   int32_t source_mix_ = 0;

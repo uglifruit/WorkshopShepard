@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — seven findings, six bugs and one law of physics
+## Found on HARDWARE — eight findings, and two of them were my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -237,6 +237,40 @@ correct can still be in tension.** The window blend was right about level and
 wrong about rotation; the wrap rotation was right about phase and assumed a
 fixed layout. Neither test caught it because each was testing its own mechanism
 in isolation.
+
+### 8. Why the density fade was impossible, and what replaced it
+
+The slewed entry gain from finding 7 was still very audible, "especially
+descending - it's not fading in at all". It wasn't. The appended layer sat at
+
+    u = (master + n) / n   ==  master/n + 1   ->  wraps to master/n
+
+which is **exactly layer 0's position**. So `entry_gain_` was not fading in a
+quiet new layer at the edge of the window; it was fading in a **duplicate of
+layer 0 at up to 0.74 gain**, on top of the original.
+
+The underlying reason both fade attempts failed is structural, and worth
+stating plainly:
+
+> **N is the window DIVISOR, so changing it respaces every layer at once.**
+> Going 3 → 4 moves all three existing layers as well as adding one. There is
+> no "entering layer" to fade, and a worst-case per-layer gain change of 0.63
+> is unavoidable.
+
+So the step is accepted, and made rare and predictable instead:
+
+- **Hysteresis** (≈16% of a step) so ADC jitter at a boundary cannot retrigger
+  it. Without that the count flickers between N and N+1 every control block,
+  which is far worse than one clean step when the knob is actually moved.
+  Verified stable against jitter, with all ten counts still reachable in both
+  directions.
+- **`1/√N` is slewed (~20 ms) rather than stepped**, so the LEVEL does not jump
+  at the same instant the layout does. The layout step is unavoidable; the
+  level step is not, and two simultaneous discontinuities read as much worse
+  than one.
+
+The wrap is now completely independent of density: max sample step at a wrap is
+5 at N=3 and unrelated to knob position.
 
 ### The lesson, which is the same one four times
 
