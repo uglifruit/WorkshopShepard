@@ -85,6 +85,11 @@ static constexpr uint32_t kControlMask = 31;
 // "stopped" position that can be found by feel.
 static constexpr int32_t kDeadzone = 50;
 
+// How far a knob must move before it takes control after a page change.
+// 1200 of 32767 is ~3.7% of travel, about 4 degrees - past ADC jitter, well
+// inside a deliberate nudge.
+static constexpr int32_t kPickupBand = 1200;
+
 // Glide rate curve coefficients - see the derivation in UpdateControl().
 //
 //     rate_q32 = |defl| * kRateLinear + defl^7 * kRateHigh
@@ -122,6 +127,12 @@ static constexpr int32_t kRateHigh = 2600;
 // As a Q32 phase increment at 48 kHz: 13.75 / 48000 * 2^32.
 static constexpr uint32_t kBaseInc = 1229782u;
 
+// Base frequency SHIFT for layer 0 of the live-audio path, as a Q32 phase
+// increment: 0.25 Hz. Layer i shifts by this doubled i times, so the stack
+// spans 0.25 Hz to ~1 kHz - inaudibly slow at the bottom, clearly shifted in
+// the middle, and windowed away at the top. See UpdateControl().
+static constexpr uint32_t kShiftBase = 22369u;
+
 class ShepardCard : public ComputerCard {
  public:
   ShepardCard() {
@@ -137,6 +148,13 @@ class ShepardCard : public ComputerCard {
       mod_q32_[i] = 0;
       win_l_[i] = 0;
       win_r_[i] = 0;
+    }
+
+    for (int p = 0; p < 2; ++p) {
+      for (int k = 0; k < 3; ++k) {
+        knob_arrival_[p][k] = 0;
+        knob_live_[p][k] = true;   // page 1 is live from boot - nothing to pick up
+      }
     }
 
     // Page 1 defaults: stopped, mid density, fully internal voice.
@@ -304,9 +322,15 @@ class ShepardCard : public ComputerCard {
         // a very quiet signal". >> 5 instead: +-2^20 becomes +-32768, which
         // is full Q15 and matches the oscillator.
         //
-        // The two quadrature terms sum in power, not amplitude, so the pair
-        // peaks at ~1.41x a single term; the >> 1 keeps that inside Q15.
-        shifted = (MulQ15(hi >> 5, c) + MulQ15(q >> 5, s)) >> 1;
+        // No halving of the pair. The two quadrature terms are 90 degrees
+        // apart, so they sum to a CONSTANT magnitude rather than adding
+        // coherently - I*cos + Q*sin is a rotation, not a doubling. Halving it
+        // cost 6 dB for nothing and was half the reason the shifter was hard to
+        // hear at all.
+        //
+        // Measured with a full-scale input: rms 446 against the synth path's
+        // 443, with 2.6 dB of headroom. Moderate inputs sit well below.
+        shifted = MulQ15(hi >> 5, c) + MulQ15(q >> 5, s);
       }
 
       // Crossfade the two sources, then apply this layer's window gain.
@@ -531,9 +555,28 @@ class ShepardCard : public ComputerCard {
     // up cost 0.003 cents of tuning, far below the LUT's own 0.0016.
     const uint32_t inc0 = ((kBaseInc >> 5) * (uint32_t)(m >> 15)) >> 10;
 
-    // Shift amount for the live path, one octave apart per layer likewise.
-    const uint32_t shift_base = (uint32_t)((rate_q32_ < 0 ? -rate_q32_
-                                                          : rate_q32_) >> 6);
+    // Shift amount for the live path.
+    //
+    // This TRACKS THE MASTER PHASE, not the glide rate. Tying it to the rate
+    // was the original design and it made the shifter inaudible: at normal
+    // glide speeds the shifts came out at 0.0017-3.5 Hz, so nothing perceptibly
+    // happened to the input. A frequency shifter needs tens of Hz before the
+    // ear registers it at all.
+    //
+    // Deriving it from the master instead gives the shift its own Shepard
+    // glide: shift_base doubles across an octave and halves back at the wrap,
+    // exactly as inc0 does, so the same window fades each layer's shift in and
+    // out and the same phase rotation keeps it seamless.
+    //
+    //     layer 0    0.25 - 0.5 Hz    inaudibly slow, as it should be
+    //     layer 4    4 - 8 Hz         a slow throb
+    //     layer 8    64 - 128 Hz      clearly shifted
+    //     layer 11   512 - 1024 Hz    far out of tune, but windowed away
+    //
+    // Stationary at noon still shifts - which is correct and is the point:
+    // the shifter is an effect ON the input, not a function of movement.
+    const uint32_t shift_base =
+        (uint32_t)(((kShiftBase >> 5) * (uint32_t)(m >> 15)) >> 10);
 
     // Window-position divisors, computed once per control block rather than
     // per layer.
@@ -719,23 +762,16 @@ class ShepardCard : public ComputerCard {
     if (page_settle_ > 0 && --page_settle_ == 0) {
       if (pending_page_ != page_) {
         page_ = pending_page_;
-        if (page_ == 1) {
-          // Capture the arrival position from the KNOB, not from stored_.
-          //
-          // stored_[1][2] holds whatever page 2 last wrote - on the first
-          // visit that is the constructor default (32767), which has no
-          // relationship to where Y is actually pointing. Capturing that made
-          // the very first knob read look like a large movement, so
-          // level_live_ latched true immediately and the level jumped to Y's
-          // physical position. With Y anticlockwise that is SILENCE, and the
-          // whole "hold until moved" protection did precisely the opposite of
-          // its purpose.
-          //
-          // Observed on hardware as "switch upwards and everything goes
-          // silent". KnobVal is the live ADC reading, so this is correct on
-          // the first visit as well as on later ones.
-          level_arrival_ = KnobVal(Knob::Y) << 3;
-          level_live_ = false;
+        {
+          // Capture where each knob is SITTING as the page arrives, from the
+          // live ADC rather than from stored_ (which holds the value the page
+          // was left at, and on the first visit the constructor default).
+          knob_arrival_[page_][0] = KnobVal(Knob::Main) << 3;
+          knob_arrival_[page_][1] = KnobVal(Knob::X) << 3;
+          knob_arrival_[page_][2] = KnobVal(Knob::Y) << 3;
+          knob_live_[page_][0] = false;
+          knob_live_[page_][1] = false;
+          knob_live_[page_][2] = false;
         }
       }
     }
@@ -767,21 +803,43 @@ class ShepardCard : public ComputerCard {
     }
     if (++panel_phase_ > 2) panel_phase_ = 0;
 
-    // OUTPUT LEVEL holds its previous value until Y is actually MOVED on this
-    // visit. Arriving on page 2 with Y at 9 o'clock and suddenly playing at a
-    // quarter volume reads as a fault rather than as a control.
-    param_level_ = level_live_ ? stored_[1][2] : level_held_;
-    if (level_live_) level_held_ = stored_[1][2];
+    // Output level. The general pickup above already holds stored_[1][2] at
+    // its previous value until Y is moved, so no separate latch is needed -
+    // an earlier one duplicated this and got the arrival capture wrong,
+    // silencing the card on the first page change.
+    param_level_ = stored_[1][2];
   }
 
-  // Knobs are always LIVE on the page being looked at. Pickup was tried on the
-  // sibling card and removed: after every page change all three knobs felt
-  // dead, with no indication that anything was waiting.
+  // PICKUP on every knob, on both pages.
+  //
+  // Without it, changing page snaps three parameters to wherever the knobs
+  // happen to be sitting - so flicking Up to check the scale would also jump
+  // the width and the level, and flicking back would jump speed, density and
+  // source. Every page change was three unintended edits.
+  //
+  // The sibling card SPECTRAL tried pickup and removed it, and its note is
+  // worth taking seriously: after a page change all three knobs felt DEAD,
+  // with no indication that anything was waiting. That is a real failure and
+  // the reason pickup usually feels bad.
+  //
+  // The fix is feedback, not abandoning pickup. This card has six LEDs, and
+  // while a knob is uncaptured its LED pulses - so "dead" becomes "waiting,
+  // and here is which one". See UpdateLeds().
+  //
+  // A knob captures when it is moved past kPickupBand from where it sat on
+  // arrival. 1200 of 32767 is about 3.7%, roughly 4 degrees of travel: far
+  // enough that ADC jitter cannot trip it, close enough that a deliberate
+  // nudge does.
   void __not_in_flash_func(UpdateKnob)(int idx, int32_t raw) {
     const int32_t val = raw << 3;      // KnobVal is 0..4095; params are Q15
-    if (page_ == 1 && idx == 2 && !level_live_) {
-      const int32_t d = val - level_arrival_;
-      if (d > 1200 || d < -1200) level_live_ = true;
+
+    if (!knob_live_[page_][idx]) {
+      const int32_t d = val - knob_arrival_[page_][idx];
+      if (d > kPickupBand || d < -kPickupBand) {
+        knob_live_[page_][idx] = true;
+      } else {
+        return;                        // still waiting - hold the old value
+      }
     }
     stored_[page_][idx] = val;
   }
@@ -794,18 +852,29 @@ class ShepardCard : public ComputerCard {
     if (++led_phase_ < 240) return;    // ~200 Hz is plenty for LEDs
     led_phase_ = 0;
 
-    // Top row: the master phase as a moving dot, so the glide is visible even
-    // when it is too slow to hear moving.
+    led_pulse_ += 40;
+    const int32_t tri_pk = (led_pulse_ & 2047) < 1024
+                               ? (led_pulse_ & 1023)
+                               : 1023 - (led_pulse_ & 1023);
+
+    // Top row: normally the master phase as a moving dot, so the glide is
+    // visible even when it is too slow to hear.
+    //
+    // But while any knob on this page is UNCAPTURED, that LED pulses instead.
+    // This is what makes pickup usable rather than baffling: a knob that does
+    // nothing is only frustrating if you cannot tell it is waiting. LED 0 is
+    // Main, 1 is X, 2 is Y - the same left-to-right order as the knobs.
     const uint32_t p = master_out_q32_ >> 30;      // 0..3
     for (uint32_t i = 0; i < 3; ++i) {
-      LedBrightness(i, (uint16_t)((p == i) ? 3000 : 200));
+      if (!knob_live_[page_][i]) {
+        LedBrightness(i, (uint16_t)(300 + tri_pk * 3));
+      } else {
+        LedBrightness(i, (uint16_t)((p == i) ? 3000 : 200));
+      }
     }
 
     // Bottom row: freeze state and page.
-    led_pulse_ += 40;
-    const int32_t tri = (led_pulse_ & 2047) < 1024
-                            ? (led_pulse_ & 1023)
-                            : 1023 - (led_pulse_ & 1023);
+    const int32_t tri = tri_pk;
     if (sealed_) {
       LedBrightness(3, (uint16_t)(1000 + tri * 3));   // pulse = SEALED
     } else {
@@ -841,7 +910,9 @@ class ShepardCard : public ComputerCard {
   int pending_page_ = 0;
   bool last_pulse1_ = false;
 
-  int32_t stored_[2][3];      // [page][knob]
+  int32_t stored_[2][3];        // [page][knob]
+  int32_t knob_arrival_[2][3];  // where each knob sat when the page arrived
+  bool knob_live_[2][3];        // has it been moved enough to take control?
 
   // Oscillator bank state.
   uint32_t osc_q32_[kMaxLayers];
@@ -885,9 +956,6 @@ class ShepardCard : public ComputerCard {
 
   int32_t param_level_ = 32767;
   int32_t level_smooth_ = 32767;
-  int32_t level_held_ = 32767;
-  int32_t level_arrival_ = 0;
-  bool level_live_ = false;
 
   uint32_t load_us_ = 0;
   int led_phase_ = 0;

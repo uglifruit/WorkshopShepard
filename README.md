@@ -60,13 +60,18 @@ bent out of shape, which is usually not what is wanted.
 The switch's two stable positions select knob pages. Down is spring-loaded and
 is a button, not a third page.
 
+**Knobs use pickup across a page change.** Arriving on a page, each knob holds
+its previous value until you move it — otherwise every page flick would edit
+three parameters at once. While a knob is waiting its LED pulses (left to
+right: Main, X, Y), so you can see which ones are still to be picked up.
+
 ### Switch MIDDLE — page 1
 
 | Knob | Function |
 |---|---|
 | **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. About 85% of the travel sits inside the illusion (46 s down to 1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
 | **X** | **Density** — 3 to 12 octave layers, stepped discretely with hysteresis. Adding a layer respaces the whole stack, so the change is audible by nature; the output level is slewed across it rather than stepping too. Summed with CV In 2. |
-| **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
+| **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. The shifter works with Main parked at noon: it is an effect on the input, not a function of movement. |
 
 ### Switch UP — page 2
 

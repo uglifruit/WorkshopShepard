@@ -225,7 +225,10 @@ class Engine:
         m = pow2_q30(self.master_out)
         inc0 = ((BASE_INC >> 5) * (m >> 15)) >> 10
 
-        shift_base = abs(self.rate) >> 6
+        # Master-tracked, not rate-tracked - see UpdateControl(). Tying it to
+        # the rate made the shifter inaudible (0.0017-3.5 Hz).
+        SHIFT_BASE = 22369
+        shift_base = ((SHIFT_BASE >> 5) * (m >> 15)) >> 10
 
         n = self.layers
         od = (0xFFFFFFFF // n) + 1
@@ -288,7 +291,7 @@ class Engine:
                     c = sin_q15((self.mod[i] + 0x40000000) & 0xFFFFFFFF)
                     s = sin_q15(self.mod[i])
                     q = hq if self.shift_up else -hq
-                    shifted = (mul_q15(hi >> 5, c) + mul_q15(q >> 5, s)) >> 1
+                    shifted = mul_q15(hi >> 5, c) + mul_q15(q >> 5, s)
 
                 v = (mul_q15(synth, 32767 - self.source_mix) +
                      mul_q15(shifted, self.source_mix))

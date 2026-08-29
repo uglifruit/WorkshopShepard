@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — eight findings, and two of them were my own fixes making things worse
+## Found on HARDWARE — ten findings, two of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -271,6 +271,53 @@ So the step is accepted, and made rare and predictable instead:
 
 The wrap is now completely independent of density: max sample step at a wrap is
 5 at N=3 and unrelated to knob position.
+
+### 9. The shifter was inaudible for two independent reasons
+
+Reported as "I can't hear what it's doing to the signal".
+
+**The shift amounts were derived from the glide RATE.** At normal glide speeds
+that gave shifts of **0.0017 to 3.5 Hz** — a frequency shifter needs tens of Hz
+before the ear registers anything at all, so at 0.017 Hz you would wait a
+minute for one cycle of beating.
+
+Now it tracks the MASTER PHASE instead, which gives the shift its own Shepard
+glide: `shift_base` doubles across an octave and halves back at the wrap,
+exactly as `inc0` does, so the same window fades each layer's shift in and out
+and the same rotation keeps it seamless.
+
+    layer 0    0.25 - 0.5 Hz     inaudibly slow, as it should be
+    layer 4    4 - 8 Hz          a slow throb
+    layer 8    64 - 128 Hz       clearly shifted
+    layer 11   512 - 1024 Hz     far out, but windowed away
+
+Note this means the shifter works with Main at noon, which is correct — it is
+an effect ON the input, not a function of movement.
+
+**And the level was 16 dB down.** The quadrature pair was being halved:
+`(I*cos + Q*sin) >> 1`. But those terms are 90° apart, so they sum to a
+CONSTANT magnitude — it is a rotation, not a doubling — and the halving cost
+6 dB for nothing. Removed: a full-scale input now measures rms 446 against the
+synth path's 443, with 2.6 dB of headroom.
+
+### 10. Page changes now use PICKUP, with LED feedback
+
+Without it, changing page snapped three parameters to wherever the knobs
+happened to be sitting: flicking Up to check the scale also jumped width and
+level, and flicking back jumped speed, density and source. Every page change
+was three unintended edits.
+
+SPECTRAL tried pickup and removed it, and its note is worth taking seriously —
+after a page change all three knobs felt DEAD, with no indication anything was
+waiting. **The fix is feedback, not abandoning pickup.** While a knob is
+uncaptured its LED pulses (0 = Main, 1 = X, 2 = Y, matching the knob order), so
+"dead" becomes "waiting, and here is which one".
+
+Capture band is 1200 of 32767, ~3.7% of travel: past ADC jitter, well inside a
+deliberate nudge. Page 1 is live from boot, so nothing is dead at power-on.
+
+This also removed a duplicate: the separate `level_live_` latch that finding 2
+fixed is now subsumed by the general mechanism.
 
 ### The lesson, which is the same one four times
 
