@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — eighteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — nineteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -619,6 +619,43 @@ after 200 samples rather than having collapsed. That is the shape of test a
 Python mirror needs for fixed-width arithmetic: the mirror shows what the
 maths *should* do, and a bounds assertion shows whether the *type* can hold
 it.
+
+### 19. PING choked the ISR — and the same bug corrupted the audio
+
+Reported as *"firing lots of triggers means the audio input side distorts...
+assuming CPU choke as it doesn't sound like clipping"*. Correct on both counts,
+and the cause was a single line.
+
+`octave_.Read(i, ...)` was called **once per voice per layer**. With four
+voices and twelve layers that is 48 reads per sample instead of 12 — but worse
+than the cost, all four voices share `drift_q16_[]`, so **the read heads
+advanced four times per sample** and the transposition was garbage. That is
+the distortion; it was never clipping.
+
+    4 voices x 12 layers x ~85 cyc = 4080 raw against a 4000 budget
+
+Hoisting the read out of the voice loop fixes both: 12 reads, 2640 cycles,
+66% raw. The heads now track the current pole rather than each voice's frozen
+rates — a deliberate simplification, since what makes a ping a ping is its
+ENVELOPE and window gains, and those stay per-voice. A strike still gates and
+still decays.
+
+**Two further trims:**
+
+- **Retire voices at −58 dB, not −72.** Every sample a voice stays "active"
+  costs a full twelve-layer pass, and nothing below −58 dB is audible under a
+  decaying envelope.
+- **Dropped the fixed `>> 1` polyphony halving.** It guaranteed four
+  simultaneous voices could never clip, at the cost of making the card **6 dB
+  quiet essentially all the time** — a player strikes one at a time and mostly
+  hears one decaying voice. Measured: a single voice peaks ~1453 at N=3 and
+  1746 at N=12, at or just past the 1450 knee, effectively transparent. Four at
+  once reaches 3436 raw, which `SoftClipOut` folds to ~1911 asymptotically
+  rather than pinning.
+
+That second one is the general point: **normalising for the worst case
+penalises the common case.** A soft clipper that never pins is there precisely
+so the rare pile-up can be allowed to hit it.
 
 ### The lesson, which is the same one four times
 

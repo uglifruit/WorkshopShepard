@@ -370,24 +370,41 @@ class ShepardCard : public ComputerCard {
     int32_t acc_l = 0;
     int32_t acc_r = 0;
 
+    // Read the octave stack ONCE PER LAYER, not once per voice per layer.
+    //
+    // This was both a performance bug and a correctness one. Each call to
+    // Read(i, ...) advances drift_q16_[i], and all four voices share that
+    // array - so with four voices sounding the read heads advanced FOUR TIMES
+    // per sample and the transposition was garbage. It also cost 48 reads per
+    // sample instead of 12, which on its own pushed the ISR over budget at
+    // 4080 cycles raw against 4000.
+    //
+    // The heads track the CURRENT pole rather than each voice's frozen rates.
+    // That is a deliberate simplification: what makes a ping a ping is its
+    // ENVELOPE and its window gains, both of which stay per-voice. The wet
+    // signal is then shaped by each voice's envelope as it is summed, so a
+    // strike still gates and still decays - the transposition simply follows
+    // the pole rather than being frozen with it.
+    int32_t wet[kMaxLayers];
+    if (source_mix_ > 0) {
+      for (int i = 0; i < active_layers_; ++i) {
+        wet[i] = octave_.Read(i, oct_rate_[i]);
+      }
+    }
+
     for (int v = 0; v < kPingVoices; ++v) {
       PingVoice& voice = ping_.Voice(v);
       if (!voice.Active()) continue;
 
       const int n = voice.Layers();
+      const int32_t env = voice.Env();
       for (int i = 0; i < n; ++i) {
-        // Internal voice: a frozen oscillator, enveloped.
         int32_t sig = 0;
         if (source_mix_ < 32767) sig = voice.Osc(i);
 
-        // Live input: octave-stacked at the ratios the pole was at when the
-        // voice was struck, through the same envelope - so the input is
-        // pitched to the strike and decays with it, rather than tracking a
-        // pole that has since moved on.
         if (source_mix_ > 0) {
-          const int32_t wet =
-              MulQ15(octave_.Read(i, voice.OctRate(i)), voice.Env());
-          sig = MulQ15(sig, 32767 - source_mix_) + MulQ15(wet, source_mix_);
+          const int32_t w = MulQ15(wet[i], env);
+          sig = MulQ15(sig, 32767 - source_mix_) + MulQ15(w, source_mix_);
         }
 
         acc_l += MulQ15(sig, voice.WinL(i));
@@ -395,20 +412,22 @@ class ShepardCard : public ComputerCard {
       }
     }
 
-    // Same normalisation as the continuous engine, PLUS one extra halving for
-    // polyphony.
+    // 1/sqrt(N) for the layers, and NO fixed halving for polyphony.
     //
-    // 1/sqrt(N) normalises for N LAYERS; it knows nothing about there being
-    // four VOICES. Four incoherent voices add as sqrt(4) = 2x in power terms,
-    // so without the extra >> 1 the output clips at every layer count -
-    // measured peak 2906 at N=3 and 3493 at N=12 against a 2047 rail. With it,
-    // worst case is 1746.
+    // An earlier version halved the output to guarantee four simultaneous
+    // voices could never clip. But four voices at full envelope is rare - a
+    // player strikes one at a time and mostly hears ONE decaying voice - so
+    // that halving made the card 6 dB quiet essentially all of the time in
+    // order to protect a case that the soft clipper already handles
+    // gracefully.
     //
-    // A voice count of four makes this an exact shift rather than another
-    // table, which is a small reason to prefer powers of two here.
+    // Measured: a single voice peaks around 1453 at N=3 and 1746 at N=12,
+    // which is at or just past the 1450 knee - effectively transparent. All
+    // four at once reaches 3493 raw, which SoftClipOut turns into 1911
+    // asymptotically rather than pinning at the rail.
     const int32_t g = inv_sqrt_n_;
-    *out_l = (MulQ15(acc_l, g) >> 5) >> 1;
-    *out_r = (MulQ15(acc_r, g) >> 5) >> 1;
+    *out_l = MulQ15(acc_l, g) >> 5;
+    *out_r = MulQ15(acc_r, g) >> 5;
   }
 
   // --- control rate --------------------------------------------------------

@@ -140,7 +140,10 @@ class PingVoice {
       env_ = MulQ15(decay_q15, env_);
       // A one-pole never truly reaches zero, so retire the voice when it is
       // inaudible rather than leaving it running forever and stealing a slot.
-      if (env_ < (8 << kPingEnvShift)) {
+      // Retire at -58 dB rather than -72. A voice below this is inaudible,
+      // and every sample it stays "active" costs a full 12-layer pass - which
+      // with four voices and the live path is what pushed the ISR over budget.
+      if (env_ < (40 << kPingEnvShift)) {
         env_ = 0;
         active_ = false;
       }
