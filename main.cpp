@@ -233,8 +233,27 @@ class ShepardCard : public ComputerCard {
     // --- control rate -----------------------------------------------------
     // Everything expensive lives here: one pow2 lookup, the window weights,
     // the scale search. 1.5 kHz rather than 48 kHz.
-    if ((sample_count_ & kControlMask) == 0) {
+    // The control block is SPLIT across two samples of each period, and the
+    // reason is peak cost rather than average cost.
+    //
+    // Everything used to land on sample 0: the rate curve, the scale search,
+    // the pow2 lookup, three divides AND a twelve-iteration per-layer loop.
+    // With four PING voices and the live path that one sample went over
+    // budget while the other 31 sat at 84% - which is exactly the reported
+    // fault, distortion only during fast triggering.
+    //
+    // Splitting the per-layer loop onto its own sample halves the peak. The
+    // control RATE is unchanged at 48 kHz / 32, so nothing about the sound
+    // changes; only the work is spread.
+    const uint32_t phase = sample_count_ & kControlMask;
+    if (phase == 0) {
       UpdateControl();
+    } else if (phase == (kControlMask + 1u) / 2u) {
+      UpdateLayers();
+      // Arm the deferred strike only now, so it copies the layer data this
+      // block just wrote rather than the previous period's. It then fires on
+      // the NEXT sample, which is neither of the two busy ones.
+      if (strike_armed_) { strike_armed_ = false; strike_pending_ = true; }
     }
     ++sample_count_;
 
@@ -361,6 +380,13 @@ class ShepardCard : public ComputerCard {
   // computes inc_[] and the window, so the structure is running the whole
   // time - a strike simply takes a copy of it.
   void __not_in_flash_func(RenderPing)(int32_t* out_l, int32_t* out_r) {
+    // The deferred strike, on the sample after the control block that armed
+    // it - see the note in UpdateControl.
+    if (strike_pending_) {
+      strike_pending_ = false;
+      ping_.Strike(layers_, inc_, win_l_, win_r_, oct_rate_);
+    }
+
     ping_.Tick(ping_decay_);
 
     // The live input is written to the octave stack continuously, so a strike
@@ -605,14 +631,15 @@ class ShepardCard : public ComputerCard {
     // ONE pow2 lookup serves every layer: because the layers are exactly an
     // octave apart, inc[i] is inc[0] shifted left by i. This is the economy
     // that makes a 12-layer bank affordable at all.
-    const int32_t m = Pow2Q30(master_out_q32_);
+    ctl_m_ = Pow2Q30(master_out_q32_);
+    const int32_t m = ctl_m_;
     // inc0 = kBaseInc * (m / 2^30), in int32 only.
     //
     // m is Q30 in [2^30, 2^31), so shifting it to Q15 first keeps the product
     // inside int32: 1229782 * 65535 would overflow, but 1229782 * 65535 >> 15
     // computed as (kBaseInc >> 5) * (m >> 15) >> 10 does not. The 5 bits given
     // up cost 0.003 cents of tuning, far below the LUT's own 0.0016.
-    const uint32_t inc0 = ((kBaseInc >> 5) * (uint32_t)(m >> 15)) >> 10;
+    ctl_inc0_ = ((kBaseInc >> 5) * (uint32_t)(m >> 15)) >> 10;
 
     // Window-position divisors, computed once per control block rather than
     // per layer.
@@ -626,6 +653,12 @@ class ShepardCard : public ComputerCard {
     master_div_ = master_out_q32_ / n;
 
 
+    if (ping_mode_ && triggered) strike_armed_ = true;
+  }
+
+  // The per-layer half of the control block - see the note in
+  // ProcessSample about why this runs on its own sample.
+  void __not_in_flash_func(UpdateLayers)() {
     // ROTATE THE OSCILLATOR PHASES WITH THE STACK.
     //
     // THIS IS THE FIX FOR THE BIG CLICK AT THE LOOP POINT. Heard on hardware
@@ -686,8 +719,8 @@ class ShepardCard : public ComputerCard {
     for (int i = 0; i < active_layers_; ++i) {
       // Clamp rather than let an increment wrap: a wrapped increment is not a
       // subtle artefact, it is a loud wrong note.
-      uint32_t inc = inc0 << i;
-      if (i >= 20 || (inc0 != 0 && (inc >> i) != inc0)) inc = 0x7FFFFFFFu;
+      uint32_t inc = ctl_inc0_ << i;
+      if (i >= 20 || (ctl_inc0_ != 0 && (inc >> i) != ctl_inc0_)) inc = 0x7FFFFFFFu;
       if (inc > 0x7FFFFFFFu) inc = 0x7FFFFFFFu;
       inc_[i] = inc;
 
@@ -697,7 +730,7 @@ class ShepardCard : public ComputerCard {
       // recycle rate - see octave.h.
       {
         const int32_t centre = i - (layers_ >> 1);
-        uint32_t r = (uint32_t)(m >> 14);           // 2^frac in Q16
+        uint32_t r = (uint32_t)(ctl_m_ >> 14);           // 2^frac in Q16
         if (centre >= 0) r <<= centre; else r >>= (-centre);
         if (r > kOctMaxRate) r = kOctMaxRate;
         if (r < 1024u) r = 1024u;
@@ -729,16 +762,20 @@ class ShepardCard : public ComputerCard {
       win_r_[i] = (int16_t)HannQ15(u_r);
     }
 
-    // PING: a trigger takes a SNAPSHOT of the pole as it stands right now.
+    // PING: a trigger ARMS a strike; the strike itself happens on the next
+    // sample, not in this one.
     //
-    // This has to happen here, at the END of the control block, because a
-    // voice copies inc_[], win_l_/win_r_[] and oct_rate_[] - all of which are
-    // computed above. Striking earlier would capture the previous block's
-    // pitches, which at a fast glide is audibly the wrong note.
-    if (ping_mode_ && triggered) {
-      ping_.Strike(layers_, inc_, win_l_, win_r_, oct_rate_);
-    }
+    // A voice copies inc_[], win_l_/win_r_[] and oct_rate_[] - all computed
+    // just above - so the snapshot must not be taken before them. But taking
+    // it HERE puts the whole control block, the ~60-word copy, four voices and
+    // the live path on the SAME sample, and that one sample is over budget
+    // even though the steady state fits at 84%.
+    //
+    // Measured on hardware: ~5 V steady with four voices, pinning during fast
+    // triggering. Deferring by one sample costs nothing musically - 20 us -
+    // and takes the copy off the worst sample entirely.
   }
+
 
   // --- panel ---------------------------------------------------------------
   void __not_in_flash_func(ReadPanel)() {
@@ -974,6 +1011,10 @@ class ShepardCard : public ComputerCard {
 
   // SPIRAL state.
   int32_t ping_decay_ = 32746;   // ~0.25 s
+  bool strike_armed_ = false;
+  bool strike_pending_ = false;
+  int32_t ctl_m_ = 0;        // pow2(master), shared across the split block
+  uint32_t ctl_inc0_ = 0;    // layer 0 increment, likewise
 
   bool freeze_ = false;
   bool gate_freeze_ = false;
