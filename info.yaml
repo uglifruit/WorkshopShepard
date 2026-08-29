@@ -1,6 +1,6 @@
 draft: true
 Name: SHEPARD
-Description: "DRAFT (untested on hardware): an infinite glissando — Shepard-Risset tones that rise or fall forever, for the internal voice or for live audio through a Hilbert frequency shifter"
+Description: "DRAFT (on hardware, still being shaken out): an infinite glissando — Shepard-Risset tones that rise or fall forever, for the internal voice or for live audio through a Hilbert frequency shifter"
 Language: C++ (ComputerCard)
 Creator: Andy Jenkinson (uglifruit)
 Version: "0.1.0"
@@ -10,9 +10,9 @@ repository: https://github.com/uglifruit/WorkshopShepard
 Editor: none
 date: 2026-08-28
 
-# NOT YET TESTED ON HARDWARE. Everything in the summary below about how the
-# card sounds is a prediction from the algorithm and from the host test suite,
-# not an observation. Flip draft/Status and populate UF2/ only after playing it.
+# ON HARDWARE, NOT FINISHED. Several listening sessions have found and fixed
+# real bugs, but the most recent fixes have not themselves been heard. Flip
+# draft/Status and populate UF2/ only once it has settled.
 
 contact:
   social:
@@ -31,11 +31,11 @@ tags:
   - delay
 
 summary: |
-  <b>DRAFT - NOT YET TESTED ON HARDWARE.</b> This card has never been flashed or
-  played. Everything below is a prediction from the algorithm and from the host
-  test suite, not an observation. There is no released binary, and the described
-  behaviour should be treated as intent rather than as fact until someone has
-  heard it.<br><br>
+  <b>DRAFT - ON HARDWARE, STILL BEING SHAKEN OUT.</b> The card has been flashed
+  and played, and several rounds of listening have found and fixed real bugs.
+  It is not finished: the most recent fixes have not themselves been heard, and
+  there is no released binary. Treat the details below as current intent rather
+  than as settled fact.<br><br>
 
   SHEPARD generates Shepard-Risset tones: the auditory illusion of a pitch that
   glides forever upward or downward without ever leaving its range. Octave-spaced
@@ -46,7 +46,7 @@ summary: |
 
   Main sets speed and direction, with a deadzone at noon so the stationary
   position can be found by feel — anticlockwise descends, clockwise ascends, and
-  CV In 1 is summed in. X sets density, 3 to 12 octave layers. Y crossfades
+  CV In 1 is summed in. X sets density, 3 to 12 octave layers, each new layer slewed in over about 5 ms rather than switched on. Y crossfades
   between two sources: the internal sine bank, and a Hilbert frequency shifter
   that drags whatever is patched into Audio In 1 through the same structure.<br><br>
 
@@ -61,12 +61,14 @@ summary: |
   Switch Up is page two: Main quantises the glide to smooth glissando, 12-ET
   chromatic, major or pentatonic; X sets stereo width; Y sets output level.
   Snapping is slewed over about 1.4 ms rather than jumped, because twelve
-  oscillators stepping together is audible as a thump. Pulse In 1 advances one
-  scale degree, and works alongside the glide rather than replacing it.<br><br>
+  oscillators stepping together is audible as a thump.<br><br>
 
   Switch Down is spring-loaded: a short press toggles FREEZE, holding for two
-  seconds toggles SEALED freeze which also silences the live input. Pulse In 2
-  freezes while high. CV Out 1 is the master phase as a 0-5V ramp, one cycle per
+  seconds toggles SEALED freeze which also silences the live input. Pulse In 1
+  freezes from a gate and resumes from exactly where it paused - the glide does
+  not run on underneath - and its rising edge advances a scale step in the
+  stepped modes. Pulse In 2 reverses the glide while held. CV In 1 and 2 offset
+  speed and density. CV Out 1 is the master phase as a 0-5V ramp, one cycle per
   octave; CV Out 2 reports the measured DSP load.<br><br>
 
   ALT-BOOT: holding the switch DOWN at power-on starts SPIRAL, a delay whose
@@ -119,19 +121,24 @@ panel:
       description: >
         Bipolar glide speed, summed with the Main knob. Applied after the
         knob's deadzone, so CV still drives the glide with Main parked at noon.
+    - id: CVIn2
+      name: Density
+      type: cv
+      description: Bipolar density offset, summed with the X knob on page one.
     - id: PulseIn1
-      name: Step
-      type: pulse
-      description: >
-        Advances one scale degree, in the stepped quantisation modes. Works
-        alongside the glide rather than replacing it - park Main at centre for
-        pure manual stepping.
-    - id: PulseIn2
       name: Freeze
       type: pulse
       description: >
-        Holds the stack while high, independently of the switch latch. Always
-        the normal freeze, never SEALED.
+        Holds the stack while high and resumes from exactly where it paused -
+        the glide does not run on underneath, so releasing never jumps ahead.
+        Its rising edge also advances one scale degree in the stepped
+        quantisation modes.
+    - id: PulseIn2
+      name: Reverse
+      type: pulse
+      description: >
+        Reverses the glide direction while high. Momentary rather than
+        latching, so it is playable against a clock.
 
   outputs:
     - id: AudioOut1

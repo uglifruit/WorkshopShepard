@@ -65,7 +65,7 @@ is a button, not a third page.
 | Knob | Function |
 |---|---|
 | **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. About 85% of the travel sits inside the illusion (46 s down to 1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
-| **X** | **Density** — 3 to 12 octave layers. |
+| **X** | **Density** — 3 to 12 octave layers, with each new layer slewed in over about 5 ms rather than switched on. Summed with CV In 2. |
 | **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
 
 ### Switch UP — page 2
@@ -79,7 +79,8 @@ is a button, not a third page.
 ### Switch DOWN — momentary
 
 - **Short press** toggles **FREEZE**: the stack stops moving through the
-  envelope but keeps sounding.
+  envelope but keeps sounding. Pulse In 1 does the same from a gate, and
+  resumes from exactly where it paused rather than jumping ahead.
 - **Hold for two seconds** toggles **SEALED** freeze, which also silences the
   live input — a true static hold. LED 3 pulses in sealed, steady in normal.
 - Any short press returns to live.
@@ -90,8 +91,9 @@ is a button, not a third page.
 |---|---|
 | Audio In 1 | Source for the frequency shifter, and for SPIRAL |
 | CV In 1 | Bipolar speed offset, summed with Main |
-| Pulse In 1 | Manual step — advances one scale degree in the stepped modes |
-| Pulse In 2 | Freeze while high |
+| CV In 2 | Bipolar density offset, summed with X |
+| Pulse In 1 | **Freeze while high** — resumes from where it stopped, and advances one scale degree on the rising edge in stepped modes |
+| Pulse In 2 | **Reverse direction while high** |
 | Audio Out 1 / 2 | Stereo output |
 | CV Out 1 | Master phase, a 0–5 V ramp — one cycle per octave |
 | CV Out 2 | Measured DSP load |

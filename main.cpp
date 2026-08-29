@@ -354,34 +354,45 @@ class ShepardCard : public ComputerCard {
 
   // --- control rate --------------------------------------------------------
   void __not_in_flash_func(UpdateControl)() {
-    // Layer count from X, 3..12, with a FRACTIONAL part so the next
-    // oscillator FADES IN rather than appearing at full gain.
+    // Layer count from X, 3..12, with the NEWEST layer slewed in rather than
+    // switched on. Integer layouts only.
     //
-    // Stepping the integer count made nine audible jumps across the knob -
-    // each one a new oscillator switched on at its full window gain.
+    // Two earlier attempts are worth recording, because the second looked
+    // right and was not:
     //
-    // What is crossfaded is the whole LAYOUT, not an individual layer:
+    //   1. Integer count, no fade. A new oscillator appeared at its full
+    //      window gain the instant the count incremented - nine audible jumps
+    //      across the knob.
     //
-    //     win[i] = (1-f) * hann(u_i at N) + f * hann(u_i at N+1)
+    //   2. Crossfading the N-layer and (N+1)-layer LAYOUTS. The window sum
+    //      stays perfectly flat at every fractional position (0.0000% ripple,
+    //      verified), so this looked correct - but the two layouts ROTATE
+    //      DIFFERENTLY at an octave wrap, so mid-blend the stack cannot rotate
+    //      cleanly and the top slot's energy is discarded every octave.
+    //      Measured: largest sample step 123 mid-fade against 5 at either end.
+    //      Heard as "the new layer popping in VERY notably".
     //
-    // That distinction is what preserves the constant-sum invariant. Scaling
-    // just the top layer by the fraction seems equivalent and is not - it
-    // gives up to 10.6% ripple at N=3.5, which is the level pulsing the card
-    // exists to avoid. Blending two layouts that EACH sum flat gives a flat
-    // sum at every fractional position (verified: 0.0000% ripple throughout).
-    //
-    // Costs one extra window evaluation per layer per channel, at control
-    // rate: ~5 cycles/sample amortised, 0.13% of budget. The per-sample inner
-    // loop is untouched - the blend is folded into win_l_/win_r_ before the
-    // audio loop ever sees it.
-    //
-    // Plain int32 throughout: an (int64_t) cast here would emit __aeabi_lmul,
-    // which this card's arithmetic exists to avoid.
-    const int32_t span = stored_[0][1] * (kMaxLayers - kMinLayers);  // Q15 * 9
+    // So: keep the layout an exact integer one, which rotates cleanly, and
+    // ramp the newest layer's gain with a slew that has nothing to do with the
+    // wrap. The window decides WHERE the layer sits; entry_gain_ decides how
+    // much of it is heard.
+    // CV In 2 offsets DENSITY, bipolar, exactly as CV In 1 offsets speed.
+    // CVIn is +-2048; << 4 spans the full Q15 knob range from a +-5V input.
+    int32_t density = stored_[0][1];
+    if (Connected(Input::CV2)) density += (int32_t)CVIn2() << 4;
+    density = ClampQ15(density);
+
+    const int32_t span = density * (kMaxLayers - kMinLayers);        // Q15 * 9
     layers_ = kMinLayers + (span >> 15);
-    layer_frac_ = span & 0x7FFF;                     // Q15 fade to the next
-    if (layers_ < kMinLayers) { layers_ = kMinLayers; layer_frac_ = 0; }
-    if (layers_ >= kMaxLayers) { layers_ = kMaxLayers; layer_frac_ = 0; }
+    const int32_t frac = span & 0x7FFF;
+    if (layers_ < kMinLayers) layers_ = kMinLayers;
+    if (layers_ > kMaxLayers) layers_ = kMaxLayers;
+
+    // Target: fully in once X has crossed the boundary, silent below it.
+    // >> 3 per control block is ~5 ms - fast enough to track the knob, slow
+    // enough that ADC jitter at a boundary cannot click.
+    const int32_t entry_target = (layers_ < kMaxLayers && frac > 0) ? 32767 : 0;
+    entry_gain_ += (entry_target - entry_gain_) >> 3;
 
     source_mix_ = ClampQ15(stored_[0][2]);
 
@@ -429,6 +440,7 @@ class ShepardCard : public ComputerCard {
     const int32_t q7 = MulQ15(q6, mag);
     int32_t rate = mag * kRateLinear + q7 * kRateHigh;
     if (defl < 0) rate = -rate;
+    if (reverse_) rate = -rate;          // Pulse In 2, momentary
     rate_q32_ = rate;
 
     shift_up_ = (defl >= 0);
@@ -486,10 +498,12 @@ class ShepardCard : public ComputerCard {
       // Freeze holds the phase ADVANCE: the stack stops moving through the
       // envelope but the oscillators keep sounding.
       //
-      // The window phase must be held TOO, or the envelope keeps sliding
-      // while the frequencies stand still - which is a slow swell rather than
-      // a freeze, and steps when freeze is released.
+      // The FREE-running phase is pinned to the held value as well. Without
+      // that it carries on advancing underneath, and releasing the gate jumps
+      // to wherever it had reached - audible as a lurch, and the opposite of
+      // what a freeze should do. Resuming continues from where it paused.
       master_out_q32_ = frozen_q32_;
+      master_free_q32_ = frozen_q32_;
     } else {
       frozen_q32_ = master_out_q32_;
     }
@@ -522,11 +536,6 @@ class ShepardCard : public ComputerCard {
     width_div_ = ((uint32_t)stored_[1][1] << 17) / n;
     master_div_ = master_out_q32_ / n;
 
-    // The (N+1)-layer layout, for the density crossfade above.
-    const uint32_t n2 = n + 1u;
-    oct_div2_ = 0xFFFFFFFFu / n2 + 1u;
-    width_div2_ = ((uint32_t)stored_[1][1] << 17) / n2;
-    master_div2_ = master_out_q32_ / n2;
 
     // ROTATE THE OSCILLATOR PHASES WITH THE STACK.
     //
@@ -567,13 +576,14 @@ class ShepardCard : public ComputerCard {
 
     // While fading in, the (N+1)th layer must be computed too - it enters at
     // gain 0 in the N layout and rises as the blend moves toward N+1.
-    active_layers_ = layers_ + ((layer_frac_ > 0 && layers_ < kMaxLayers) ? 1 : 0);
+    active_layers_ = layers_ + ((entry_gain_ > 0 && layers_ < kMaxLayers) ? 1 : 0);
 
-    // Interpolate 1/sqrt(N) across the fade, so the level is continuous.
+    // 1/sqrt(N) follows the SLEWED gain, not the raw knob, so the level is
+    // continuous with the layer that is actually sounding.
     {
       const int32_t a = kInvSqrtN[layers_];
       const int32_t b = kInvSqrtN[layers_ < kMaxLayers ? layers_ + 1 : layers_];
-      inv_sqrt_n_ = a + MulQ15(layer_frac_, b - a);
+      inv_sqrt_n_ = a + MulQ15(entry_gain_, b - a);
     }
 
     for (int i = 0; i < active_layers_; ++i) {
@@ -607,21 +617,14 @@ class ShepardCard : public ComputerCard {
       const uint32_t u_l = master_div_ + (uint32_t)i * oct_div_;
       const uint32_t u_r = u_l + width_div_;
 
-      if (layer_frac_ == 0) {
-        win_l_[i] = (int16_t)HannQ15(u_l);
-        win_r_[i] = (int16_t)HannQ15(u_r);
-      } else {
-        // Blend this layer's gain in the N-layer layout with its gain in the
-        // (N+1)-layer layout. Both layouts sum flat, so the blend does too.
-        const uint32_t v_l = master_div2_ + (uint32_t)i * oct_div2_;
-        const uint32_t v_r = v_l + width_div2_;
-        const int32_t a_l = HannQ15(u_l);
-        const int32_t a_r = HannQ15(u_r);
-        const int32_t b_l = HannQ15(v_l);
-        const int32_t b_r = HannQ15(v_r);
-        win_l_[i] = (int16_t)(a_l + MulQ15(layer_frac_, b_l - a_l));
-        win_r_[i] = (int16_t)(a_r + MulQ15(layer_frac_, b_r - a_r));
+      int32_t w_l = HannQ15(u_l);
+      int32_t w_r = HannQ15(u_r);
+      if (i == layers_) {          // the layer currently entering
+        w_l = MulQ15(w_l, entry_gain_);
+        w_r = MulQ15(w_r, entry_gain_);
       }
+      win_l_[i] = (int16_t)w_l;
+      win_r_[i] = (int16_t)w_r;
     }
   }
 
@@ -732,16 +735,22 @@ class ShepardCard : public ComputerCard {
       }
     }
 
-    // Pulse In 2 freezes while held, independently of the latch. Always normal
-    // freeze - sealed is a deliberate, held-switch act.
-    const bool pulse2 = PulseIn2();
-    freeze_ = freeze_latch_ || pulse2;
-    sealed_ = sealed_latch_ && !pulse2;
+    // Pulse In 2 REVERSES the glide while held. Released, the direction goes
+    // back to whatever Main says - a momentary flip rather than a latch, which
+    // is what makes it playable against a clock.
+    reverse_ = PulseIn2();
 
-    // Pulse In 1: counted on the rising edge.
+    // Pulse In 1 FREEZES while held, and resumes FROM WHERE IT STOPPED.
+    // The free-running phase is pinned during the gate (see UpdateControl), so
+    // releasing continues from exactly where it paused rather than jumping to
+    // wherever an underlying phase had reached.
     const bool pulse1 = PulseIn1();
     if (pulse1 && !last_pulse1_) ++trigger_count_;
     last_pulse1_ = pulse1;
+    gate_freeze_ = pulse1;
+
+    freeze_ = freeze_latch_ || gate_freeze_;
+    sealed_ = sealed_latch_ && !gate_freeze_;
 
     // One knob per sample, round-robin. Each still updates at ~16 kHz, far
     // faster than a hand.
@@ -849,9 +858,8 @@ class ShepardCard : public ComputerCard {
   int32_t rate_q32_ = 0;
   int layers_ = 6;
   int active_layers_ = 6;   // layers_ + 1 while a new layer is fading in
-  int32_t layer_frac_ = 0;  // Q15 blend toward the (N+1)-layer layout
+  int32_t entry_gain_ = 0;  // Q15 slewed gain of the entering layer
   int32_t inv_sqrt_n_ = 13377;
-  uint32_t master_div2_ = 0, oct_div2_ = 0, width_div2_ = 0;
   int scale_ = 0;
   int32_t source_mix_ = 0;
   bool shift_up_ = true;
@@ -863,6 +871,8 @@ class ShepardCard : public ComputerCard {
   int32_t spiral_mix_ = 16384;
 
   bool freeze_ = false;
+  bool gate_freeze_ = false;
+  bool reverse_ = false;
   bool sealed_ = false;
   bool freeze_latch_ = false;
   bool sealed_latch_ = false;

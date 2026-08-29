@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — six findings, five bugs and one law of physics
+## Found on HARDWARE — seven findings, six bugs and one law of physics
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -214,6 +214,29 @@ level steps where the layers no longer do.
 Costs one extra window evaluation per layer per channel at control rate: about
 5 cycles/sample amortised, 0.13% of budget. The per-sample inner loop is
 untouched.
+
+### 7. The density crossfade fought the octave wrap
+
+The fade from finding 6 made the popping WORSE, not better - "I can hear the
+new layer popping in VERY notably now."
+
+Crossfading the N-layer and (N+1)-layer LAYOUTS keeps the window sum perfectly
+flat at every fractional position (0.0000% ripple, verified), so it looked
+correct. But **the two layouts rotate differently at an octave wrap**, so
+mid-blend the stack cannot rotate cleanly and the top slot's energy is
+discarded once per octave. Measured: largest sample step **123 mid-fade against
+5 at either end** — worse than the stepping it replaced.
+
+Fixed by separating the two concerns. The layout stays an exact integer one,
+which rotates cleanly; the newest layer's gain is slewed independently
+(`entry_gain_`, `>> 3` per control block ≈ 5 ms), which has nothing to do with
+the wrap. Max step is now 5 at every fade position.
+
+The general shape of the mistake: **two mechanisms that are individually
+correct can still be in tension.** The window blend was right about level and
+wrong about rotation; the wrap rotation was right about phase and assumed a
+fixed layout. Neither test caught it because each was testing its own mechanism
+in isolation.
 
 ### The lesson, which is the same one four times
 

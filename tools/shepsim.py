@@ -193,6 +193,7 @@ class Engine:
         self.master_out = 0
         self.win_phase = 0
         self.active = layers
+        self.entry_gain = 0
         self.prev_master = None
         self.hilbert = Hilbert()
         self.rate = 0
@@ -244,13 +245,14 @@ class Engine:
                     self.osc[i] = self.osc[i + 1]
         self.prev_master = self.master_out
 
-        # (N+1)-layer layout, for the density crossfade
-        n2 = n + 1
-        od2 = (0xFFFFFFFF // n2) + 1
-        wd2 = ((self.width << 17) // n2) & 0xFFFFFFFF
-        md2 = self.master_out // n2
-        f = self.layer_frac
-        self.active = n + (1 if (f > 0 and n < MAX_LAYERS) else 0)
+        # The newest layer is SLEWED in, and the layout stays an exact
+        # integer one. Crossfading the N and N+1 LAYOUTS keeps the window sum
+        # flat but the two rotate differently at an octave wrap, so mid-fade
+        # the stack cannot rotate cleanly - measured 123 vs 5. See the note in
+        # UpdateControl().
+        target = 32767 if self.layer_frac > 0 else 0
+        self.entry_gain += (target - self.entry_gain) >> 3
+        self.active = n + (1 if (self.entry_gain > 0 and n < MAX_LAYERS) else 0)
 
         for i in range(self.active):
             inc = (inc0 << i) & 0xFFFFFFFF
@@ -260,16 +262,12 @@ class Engine:
             self.mod_inc[i] = (shift_base << i) & 0xFFFFFFFF
             u_l = (md + i * od) & 0xFFFFFFFF
             u_r = (u_l + wd) & 0xFFFFFFFF
-            if f == 0:
-                self.win_l[i] = hann_q15(u_l)
-                self.win_r[i] = hann_q15(u_r)
-            else:
-                v_l = (md2 + i * od2) & 0xFFFFFFFF
-                v_r = (v_l + wd2) & 0xFFFFFFFF
-                a_l, a_r = hann_q15(u_l), hann_q15(u_r)
-                b_l, b_r = hann_q15(v_l), hann_q15(v_r)
-                self.win_l[i] = a_l + mul_q15(f, b_l - a_l)
-                self.win_r[i] = a_r + mul_q15(f, b_r - a_r)
+            w_l, w_r = hann_q15(u_l), hann_q15(u_r)
+            if i == n:
+                w_l = mul_q15(w_l, self.entry_gain)
+                w_r = mul_q15(w_r, self.entry_gain)
+            self.win_l[i] = w_l
+            self.win_r[i] = w_r
 
     def render(self, n_samples, audio_in=None):
         """Returns (left, right) lists of int16-range samples."""
@@ -307,7 +305,7 @@ class Engine:
 
             a = INV_SQRT_N[self.layers]
             b = INV_SQRT_N[min(self.layers + 1, MAX_LAYERS)]
-            g = a + mul_q15(self.layer_frac, b - a)
+            g = a + mul_q15(self.entry_gain, b - a)
             left.append(soft_clip_out(mul_q15(acc_l, g) >> 5))
             right.append(soft_clip_out(mul_q15(acc_r, g) >> 5))
         return left, right
