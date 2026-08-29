@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — sixteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — seventeen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -548,6 +548,47 @@ on pathological input and the rail is never reached. The octave stack is also
 much better behaved than the comb it replaced, because it transposes rather
 than resonates — level barely depends on source type.
 
+### 17. PING replaced SPIRAL as the alt-boot
+
+SPIRAL was rejected by ear. It was a competent pitch-shifting delay but had
+nothing to do with the card's own idea, and it spent 128 KB saying so.
+
+PING is the user's design and is much better: **the pole keeps climbing but
+silently, and a trigger voices a snapshot of it that decays WITHOUT climbing.**
+An invisible barber's pole you strike. Each trigger lands wherever the glide has
+reached, so repeated strikes build a chord out of one rising structure — the
+illusion becomes something you play rather than something you listen to.
+
+A voice copies `inc_[]`, `win_l_/win_r_[]` and `oct_rate_[]` and adds an
+envelope. Nothing in it moves except that envelope, which is exactly what "does
+not climb once voiced" means. Four voices, oldest stolen.
+
+**Three things it needed:**
+
+1. **Strike at the END of the control block.** A voice copies values that
+   `UpdateControl` computes; striking earlier captures the *previous* block's
+   pitches, which at a fast glide is audibly the wrong note.
+
+2. **Phases reset to zero, not copied.** Every layer starting at phase zero
+   means every layer starts at zero amplitude, so the attack has nothing to
+   click against. Copying the pole's running phases would start twelve
+   oscillators mid-cycle at once — a broadband transient.
+
+3. **A Q20 decay TABLE, not a shift.** `env -= env >> n` is the obvious
+   one-pole and it does not work here: the envelope is 15 bits, so `env >> 17`
+   is **zero for every value it can hold** — the decay never begins and the
+   voice rings forever. Anything above ~14 stalls outright. The envelope now
+   runs in Q24 internally and is multiplied by a tabled Q20 coefficient,
+   giving a measured 23 ms to 1.84 s, evenly spaced.
+
+**And one real headroom finding:** `1/√N` normalises for N LAYERS and knows
+nothing about there being four VOICES. Without an extra `>> 1` the output
+clipped at every layer count — measured peak 2906 at N=3 and 3493 at N=12
+against a 2047 rail. With it, worst case 1746.
+
+`spiral.h` and `spiral_check.py` removed; `SoftClipOut` moved to `fixed.h`
+where it belongs, and the delay buffer is now owned by the octave stack alone.
+
 ### The lesson, which is the same one four times
 
 A test that begins *downstream* of the thing that is broken cannot see it.
@@ -761,7 +802,7 @@ the tail at every setting.
 | `shepard.cpp` | `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, split divisor, illusion continuity |
 | `shepard.cpp` | `tools/quant_check.py` | scale tables, octave wrap, portamento direction, stepping |
 | `octave.h` | `tools/octave_check.py` | transposition ratio, crossfade constant-sum, recycle rates, head rotation at the wrap |
-| `spiral.h` | `tools/spiral_check.py` | shift ratio, crossfade, buffer bounds, loop stability at DC |
+| `ping.h` | `tools/ping_check.py` | pitch frozen after a strike, strikes differ, envelope range, voice stealing, polyphonic headroom |
 | **whole chain** | **`tools/passthru_check.py`** | **end-to-end gain — run after ANY scaling change** |
 | whole engine | `tools/shepsim.py` | renders WAVs, and the seam analysis (below) |
 

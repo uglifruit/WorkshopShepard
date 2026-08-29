@@ -176,4 +176,12 @@ uint32_t StepScale(uint32_t pos_q32, int scale, int dir) {
   return tab[idx];
 }
 
+// PING decay coefficients, Q20 - see ping.h for why a shift will not do.
+// Exponentially spaced, measured 17 ms to 2.05 s.
+const int32_t kPingDecay[17] = {
+  1038030, 1040798, 1042842, 1044350, 1045461, 1046281,
+  1046885, 1047330, 1047658, 1047900, 1048078, 1048209,
+  1048306, 1048377, 1048429, 1048468, 1048497,
+};
+
 }  // namespace shepard

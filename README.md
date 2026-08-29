@@ -165,27 +165,39 @@ This is the authority on whether the card fits — not any figure in this README
 sibling card SPECTRAL was modelled at 51% and measured 231% on real hardware.
 Until a voltmeter says otherwise, the cost of this card is unknown.
 
-## SPIRAL mode (alt-boot)
+## PING mode (alt-boot)
 
 **Hold the switch DOWN at power-on.**
 
-A delay whose feedback path is pitch-shifted, so every repeat comes back
-transposed and the echoes spiral away upward or downward forever — the
-time-domain cousin of what the card does in its normal mode.
+The pole keeps climbing — but silently. A trigger on Pulse In 1 voices a
+**ping** at whatever pitches the pole has reached, and that ping decays
+*without climbing*, because it is a snapshot rather than a window onto the
+moving stack.
+
+So the illusion runs the whole time and you only hear where it happens to be
+at the moments you strike it. Trigger repeatedly and each ping comes from a
+different point on the pole, building a chord out of one silently-rising
+structure. Because the pole wraps every octave, the pitches available are
+endless but bounded — the barber's pole becomes something you play rather than
+something you listen to.
 
 | Knob | Function |
 |---|---|
-| Main (page 1) | Shift amount, ±12 semitones. Centre is unity — a clean, unshifted delay. |
-| X (page 1) | Delay time, 25 ms to 1.365 s |
-| Y (page 1) | Dry / wet |
-| Main (page 2) | Feedback |
+| Main (page 1) | Pole speed — how fast the invisible climb moves between strikes |
+| X (page 1) | Density |
+| Y (page 1) | Source mix |
+| Main (page 2) | **Ping decay** — 23 ms click to a 1.8 s ring |
 
-Feedback is capped at 0.95, higher than a plain delay would allow, because
-SPIRAL is *supposed* to sustain. What keeps it stable is the pitch shift
-itself: energy shifted up eventually leaves through Nyquist, and energy shifted
-down leaves through the loop's highpass. At the centre deadzone neither escape
-route operates, so a unity-shift setting at high feedback will ring for a long
-time — that is the documented behaviour of that position, not a fault.
+Four voices, oldest stolen when all are busy, so the newest four strikes are
+always the ones sounding.
+
+**Patch Pulse Out 1 back into Pulse In 1** and the card strikes itself once per
+octave — a self-playing instrument whose pitch sequence never repeats within a
+cycle. Or drive Pulse In 1 from anything else to play it deliberately.
+
+With Y clockwise the live input is **gated by the ping envelope and transposed
+to the struck pitches**, so your own signal is what rings — the pole's pitch
+appears in your source material rather than alongside it.
 
 Even LEDs (0/2/4) show a normal boot, odd LEDs (1/3/5) the alt-boot.
 

@@ -28,7 +28,7 @@ tags:
   - glissando
   - scale
   - frequency-shifter
-  - delay
+  - percussion
 
 summary: |
   <b>DRAFT - ON HARDWARE, STILL BEING SHAKEN OUT.</b> The card has been flashed
@@ -70,21 +70,23 @@ summary: |
   speed and density. CV Out 1 is the master phase as a 0-5V ramp, one cycle per
   octave; CV Out 2 reports the measured DSP load.<br><br>
 
-  ALT-BOOT: holding the switch DOWN at power-on starts SPIRAL, a delay whose
-  feedback path is pitch-shifted so every repeat comes back transposed and the
-  echoes spiral away forever. Main becomes shift amount (centre is unity, a clean
-  delay), X delay time, Y dry/wet, and page-two Main becomes feedback. Feedback
-  is capped higher than a plain delay would allow because the pitch shift is what
-  stabilises the loop — energy shifted up leaves through Nyquist, energy shifted
-  down leaves through the loop highpass.<br><br>
+  ALT-BOOT - PING: holding the switch DOWN at power-on makes the pole climb
+  SILENTLY. A trigger on Pulse In 1 voices a ping at whatever pitches the pole
+  has reached, and that ping decays WITHOUT climbing - it is a snapshot, not a
+  window onto the moving stack. Trigger repeatedly and each ping comes from a
+  different point on the pole, building a chord out of one rising structure, so
+  the barber's pole becomes something you play rather than something you listen
+  to. Four voices, oldest stolen. Page-two Main sets the decay, 23ms to 1.8s.
+  Patch Pulse Out 1 back to Pulse In 1 and it strikes itself once per octave.
+  With Y clockwise the live input is gated by the ping envelope AND transposed
+  to the struck pitches, so your own signal is what rings.<br><br>
 
   All fixed point: the RP2040 has no FPU, so a float multiply costs ~360ns
   against a 20.8us per-sample budget. Two economies make a twelve-layer stereo
   bank affordable — because the layers are exactly an octave apart every layer's
   increment is layer 0's shifted left by i, so ONE exponential lookup serves all
-  twelve at 1.5kHz rather than 48kHz; and the octave stack's read heads share
-  one delay buffer with the alt-boot SPIRAL delay, since the two modes never
-  run at the same time. The envelope reuses the first half of
+  twelve at 1.5kHz rather than 48kHz; and the octave stack's read heads all
+  share one delay buffer, which is the card's single large allocation. The envelope reuses the first half of
   the sine table rather than needing one of its own, and sums to exactly N/2 at
   every layer count and phase.<br><br>
 
@@ -110,7 +112,7 @@ panel:
       name: In
       type: audio
       description: >
-        Source for the octave stack, and for the SPIRAL delay. Wants clear
+        Source for the octave stack, and for PING's gated voice. Wants clear
         pitch content - a voice, a synth line, a drone, a chord. Percussion
         works but smears, since each read head spans a 341 ms window.
     - id: CVIn1
@@ -211,24 +213,13 @@ controls:
         description: >
           Output level. Holds its current value until the knob is actually
           moved, so changing page never drops the volume.
-    - when: Switch Middle (page 1), SPIRAL alt-boot
+    - when: Switch Up (page 2), PING alt-boot
       main:
-        name: SHIFT
+        name: DECAY
         description: >
-          Pitch shift applied to each repeat, plus or minus 12 semitones.
-          Centre is unity - a clean, unshifted delay.
-      x:
-        name: TIME
-        description: Delay length, 25ms to 1.365s.
-      y:
-        name: MIX
-        description: Dry / wet balance.
-    - when: Switch Up (page 2), SPIRAL alt-boot
-      main:
-        name: FEEDBACK
-        description: >
-          Loop gain. Capped at 0.95 - higher than a plain delay would allow,
-          because the pitch shift itself stabilises the loop.
+          How long each ping rings, from a 23ms click to a 1.8s bell. Page one
+          is unchanged from normal boot, so the pole is driven the same way -
+          it is simply silent until struck.
 
   leds:
     - when: Normal running

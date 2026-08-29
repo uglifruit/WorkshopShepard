@@ -98,6 +98,28 @@ static inline int32_t __not_in_flash_func(ClampDac)(int32_t v) {
   return v;
 }
 
+// Soft clip at the DAC's scale, for the final output sum.
+//
+// LIFTED FROM WorkshopSpectral's tape.h, including the derivation. Linear
+// below the knee, then a RATIONAL curve that approaches the limit
+// asymptotically and NEVER pins:
+//
+//     y = knee + over*room/(room + over),  over = |x| - knee
+//
+// That last property is the point. The quadratic knee it replaced had a narrow
+// soft region and simply flattened above it, which is what made loud material
+// sound clipped on hardware even after the gain staging was right.
+static inline int32_t __not_in_flash_func(SoftClipOut)(int32_t x) {
+  const int32_t lim = 2047;
+  const int32_t knee = 1450;
+  const int32_t ax = x < 0 ? -x : x;
+  if (ax <= knee) return x;
+  const int32_t over = ax - knee;
+  const int32_t room = lim - knee;
+  const int32_t y = knee + (over * room) / (room + over);
+  return x < 0 ? -y : y;
+}
+
 static inline int32_t __not_in_flash_func(ClampQ15)(int32_t v) {
   if (v > 32767) return 32767;
   if (v < 0) return 0;

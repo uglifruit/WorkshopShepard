@@ -10,7 +10,7 @@
 //   shepard.cpp   tables, window, scale quantisation  (tools/shepard_check.py,
 //                                                      tools/quant_check.py)
 //   comb.h        rising comb filter for live audio    (tools/comb_check.py)
-//   spiral.h      alt-boot pitch-shifting delay       (tools/spiral_check.py)
+//   ping.h        alt-boot: strike the invisible pole  (tools/ping_check.py)
 //   main.cpp      panel, CV, LEDs, and the audio ISR
 //
 // CORE SPLIT - deliberately NOT WorkshopSpectral's arrangement.
@@ -40,7 +40,7 @@
 #include "fixed.h"
 #include "shepard.h"
 #include "octave.h"
-#include "spiral.h"
+#include "ping.h"
 
 using namespace shepard;
 
@@ -132,17 +132,16 @@ static constexpr int32_t kRateHigh = 2600;
 // As a Q32 phase increment at 48 kHz: 13.75 / 48000 * 2^32.
 static constexpr uint32_t kBaseInc = 1229782u;
 
-// Shared delay buffer, 128 KB. SPIRAL (alt-boot) and the octave stack
-// (normal boot) are mutually exclusive, so one allocation serves both.
-//
-// A plain global in a .cpp, deliberately - see the table note in shepard.h.
-int16_t g_delay_buf[kSpiralLen];
+// The octave stack's delay buffer, 128 KB - the card's one large allocation,
+// and 93% of its RAM. A plain global, deliberately: see the table note in
+// shepard.h about statics in headers landing in flash.
+int16_t g_delay_buf[kOctLen];
 
 class ShepardCard : public ComputerCard {
  public:
   ShepardCard() {
     octave_.Init(g_delay_buf);
-    spiral_.Init(g_delay_buf);
+    ping_.Init();
 
     boot_mute_ = kBootMute;
     page_ = 0;
@@ -187,7 +186,7 @@ class ShepardCard : public ComputerCard {
       // here, despite being the unsettled value, precisely because the reading
       // happens once, after the filter has resolved from any start position.
       if (boot_mute_ == 0) {
-        spiral_mode_ = (SwitchVal() == Switch::Down);
+        ping_mode_ = (SwitchVal() == Switch::Down);
         boot_splash_ = kBootSplash;
         // Start on whichever page the switch is already showing, so the card
         // does not immediately page on the first move. A Down alt-boot springs
@@ -204,7 +203,7 @@ class ShepardCard : public ComputerCard {
       if (boot_splash_ > 0) {
         --boot_splash_;
         for (uint32_t i = 0; i < 6; ++i) {
-          LedOn(i, ((i & 1u) == 1u) == spiral_mode_);
+          LedOn(i, ((i & 1u) == 1u) == ping_mode_);
         }
       }
 
@@ -219,7 +218,7 @@ class ShepardCard : public ComputerCard {
     if (boot_splash_ > 0) {
       --boot_splash_;
       for (uint32_t i = 0; i < 6; ++i) {
-        LedOn(i, ((i & 1u) == 1u) == spiral_mode_);
+        LedOn(i, ((i & 1u) == 1u) == ping_mode_);
       }
       if (boot_splash_ == 0) {
         // Hand the LEDs back cleanly - LedOn and LedBrightness drive the same
@@ -242,8 +241,8 @@ class ShepardCard : public ComputerCard {
     int32_t l = 0;
     int32_t r = 0;
 
-    if (spiral_mode_) {
-      RenderSpiral(&l, &r);
+    if (ping_mode_) {
+      RenderPing(&l, &r);
     } else {
       RenderShepard(&l, &r);
     }
@@ -255,8 +254,8 @@ class ShepardCard : public ComputerCard {
     l = MulQ15(l, level_smooth_);
     r = MulQ15(r, level_smooth_);
 
-    AudioOut1((int16_t)SpiralDelay::SoftClipOut(l));
-    AudioOut2((int16_t)SpiralDelay::SoftClipOut(r));
+    AudioOut1((int16_t)SoftClipOut(l));
+    AudioOut2((int16_t)SoftClipOut(r));
 
     // CV 1: master phase as a 0-5 V ramp, one cycle per octave. This is the
     // card's clock - patch it to watch the glide, or to drive something else
@@ -356,20 +355,60 @@ class ShepardCard : public ComputerCard {
   }
 
   // --- the alt-boot delay --------------------------------------------------
-  void __not_in_flash_func(RenderSpiral)(int32_t* out_l, int32_t* out_r) {
-    const int32_t in = sealed_ ? 0 : ((int32_t)AudioIn1() << 3);
-    const int32_t wet =
-        spiral_.Process(in, spiral_rate_q16_, spiral_time_, spiral_feedback_);
+  // --- PING: strike the invisible pole ---------------------------------
+  //
+  // The pole itself is silent here. UpdateControl still advances it and still
+  // computes inc_[] and the window, so the structure is running the whole
+  // time - a strike simply takes a copy of it.
+  void __not_in_flash_func(RenderPing)(int32_t* out_l, int32_t* out_r) {
+    ping_.Tick(ping_decay_);
 
-    // Dry and wet share the output budget. Returning >> 3 undoes the drive, so
-    // "wet at unity" is the same size as the dry.
-    const int32_t dry_sig = (int32_t)AudioIn1();
-    const int32_t wet_sig = wet >> 3;
+    // The live input is written to the octave stack continuously, so a strike
+    // has recent material to transpose rather than starting from silence.
+    octave_.Write((int32_t)AudioIn1() << 5);
 
-    const int32_t mixed = MulQ15(dry_sig, 32767 - spiral_mix_) +
-                          MulQ15(wet_sig, spiral_mix_);
-    *out_l = mixed;
-    *out_r = mixed;
+    int32_t acc_l = 0;
+    int32_t acc_r = 0;
+
+    for (int v = 0; v < kPingVoices; ++v) {
+      PingVoice& voice = ping_.Voice(v);
+      if (!voice.Active()) continue;
+
+      const int n = voice.Layers();
+      for (int i = 0; i < n; ++i) {
+        // Internal voice: a frozen oscillator, enveloped.
+        int32_t sig = 0;
+        if (source_mix_ < 32767) sig = voice.Osc(i);
+
+        // Live input: octave-stacked at the ratios the pole was at when the
+        // voice was struck, through the same envelope - so the input is
+        // pitched to the strike and decays with it, rather than tracking a
+        // pole that has since moved on.
+        if (source_mix_ > 0) {
+          const int32_t wet =
+              MulQ15(octave_.Read(i, voice.OctRate(i)), voice.Env());
+          sig = MulQ15(sig, 32767 - source_mix_) + MulQ15(wet, source_mix_);
+        }
+
+        acc_l += MulQ15(sig, voice.WinL(i));
+        acc_r += MulQ15(sig, voice.WinR(i));
+      }
+    }
+
+    // Same normalisation as the continuous engine, PLUS one extra halving for
+    // polyphony.
+    //
+    // 1/sqrt(N) normalises for N LAYERS; it knows nothing about there being
+    // four VOICES. Four incoherent voices add as sqrt(4) = 2x in power terms,
+    // so without the extra >> 1 the output clips at every layer count -
+    // measured peak 2906 at N=3 and 3493 at N=12 against a 2047 rail. With it,
+    // worst case is 1746.
+    //
+    // A voice count of four makes this an exact shift rather than another
+    // table, which is a small reason to prefer powers of two here.
+    const int32_t g = inv_sqrt_n_;
+    *out_l = (MulQ15(acc_l, g) >> 5) >> 1;
+    *out_r = (MulQ15(acc_r, g) >> 5) >> 1;
   }
 
   // --- control rate --------------------------------------------------------
@@ -475,9 +514,13 @@ class ShepardCard : public ComputerCard {
 
     shift_up_ = (defl >= 0);
 
-    if (spiral_mode_) {
-      UpdateSpiralControl(defl);
-      return;
+    if (ping_mode_) {
+      // Page 2 Main sets the decay, from a short pluck to a long ring. The
+      // shift is inverted because a LARGER shift decays SLOWER.
+      int32_t idx = (stored_[1][0] * kPingDecaySteps) >> 15;
+      if (idx >= kPingDecaySteps) idx = kPingDecaySteps - 1;
+      if (idx < 0) idx = 0;
+      ping_decay_ = kPingDecay[idx];
     }
 
     // --- master phase ---
@@ -504,7 +547,8 @@ class ShepardCard : public ComputerCard {
     // a bool set by the ISR and cleared elsewhere loses any trigger arriving
     // between the read and the clear.
     const uint32_t tc = trigger_count_;
-    if (tc != trigger_seen_) {
+    const bool triggered = (tc != trigger_seen_);
+    if (triggered) {
       trigger_seen_ = tc;
       if (scale_ != kScaleSmooth) {
         master_free_q32_ = StepScale(master_free_q32_, scale_,
@@ -665,37 +709,16 @@ class ShepardCard : public ComputerCard {
       win_l_[i] = (int16_t)HannQ15(u_l);
       win_r_[i] = (int16_t)HannQ15(u_r);
     }
-  }
 
-  void __not_in_flash_func(UpdateSpiralControl)(int32_t defl) {
-    // Main sets the shift, +-12 semitones, with the same deadzone giving a
-    // true unity-rate region at noon - a clean unshifted delay, and a
-    // necessary reference point.
-    // The shift is +-1 octave, and the knob is linear in PITCH across it.
+    // PING: a trigger takes a SNAPSHOT of the pole as it stands right now.
     //
-    // Deflection is +-16384, and one octave is 2^32 in the pow2 LUT's input,
-    // so the conversion is a shift of 18 - not a Q15 semitone intermediate.
-    // The first version went through `(defl * 12) >> 4` and then `<< 13`,
-    // which does not land on the LUT's Q32 octave scale at all: it spanned
-    // +-0.28 SEMITONES instead of +-12, a factor of 43. The alt-boot would
-    // have sounded like a slightly detuned echo rather than a shimmer, and
-    // nothing in the host tests covered it because spiral_check.py exercises
-    // SpiralDelay::Process directly with a rate handed to it.
-    const int32_t oct_q32 = defl << 18;               // +-1 octave
-
-    // Pow2Q30 takes the FRACTIONAL part and returns 2^f in [1,2) as Q30. For
-    // a negative octave the unsigned wrap gives the right fraction, and the
-    // integer octave below is then one extra right shift.
-    const int32_t p = Pow2Q30((uint32_t)oct_q32);
-    uint32_t rate = (oct_q32 >= 0) ? (uint32_t)(p >> 14)   // 1.0 .. 2.0 in Q16
-                                   : (uint32_t)(p >> 15);  // 0.5 .. 1.0
-    if (rate < 16384u) rate = 16384u;
-    if (rate > 262144u) rate = 262144u;
-    spiral_rate_q16_ = rate;
-
-    spiral_time_ = stored_[0][1];        // page 1 X
-    spiral_mix_ = stored_[0][2];         // page 1 Y
-    spiral_feedback_ = stored_[1][0];    // page 2 Main
+    // This has to happen here, at the END of the control block, because a
+    // voice copies inc_[], win_l_/win_r_[] and oct_rate_[] - all of which are
+    // computed above. Striking earlier would capture the previous block's
+    // pitches, which at a fast glide is audibly the wrong note.
+    if (ping_mode_ && triggered) {
+      ping_.Strike(layers_, inc_, win_l_, win_r_, oct_rate_);
+    }
   }
 
   // --- panel ---------------------------------------------------------------
@@ -874,7 +897,7 @@ class ShepardCard : public ComputerCard {
 
     // In SPIRAL mode both page LEDs carry a slow counter-phase glow, so the
     // alt-boot stays obvious after the splash has gone.
-    if (spiral_mode_) {
+    if (ping_mode_) {
       const uint16_t glow = (uint16_t)(400 + tri);
       LedBrightness(4, page_ == 0 ? 2500 : glow);
       LedBrightness(5, page_ == 1 ? 2500 : glow);
@@ -885,11 +908,11 @@ class ShepardCard : public ComputerCard {
   }
 
   OctaveStack octave_;
-  SpiralDelay spiral_;
+  PingBank ping_;
 
   int32_t boot_mute_;
   int32_t boot_splash_ = 0;
-  bool spiral_mode_ = false;
+  bool ping_mode_ = false;
   uint32_t sample_count_ = 0;
 
   int panel_phase_ = 0;
@@ -931,10 +954,7 @@ class ShepardCard : public ComputerCard {
   bool shift_up_ = true;   // glide direction, for Pulse In 1 stepping
 
   // SPIRAL state.
-  uint32_t spiral_rate_q16_ = 65536;
-  int32_t spiral_time_ = 16384;
-  int32_t spiral_feedback_ = 16384;
-  int32_t spiral_mix_ = 16384;
+  int32_t ping_decay_ = 1048078;   // ~0.36 s
 
   bool freeze_ = false;
   bool gate_freeze_ = false;

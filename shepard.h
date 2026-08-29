@@ -158,6 +158,11 @@ extern const int16_t kInvSqrtN[];   // [kMaxLayers + 1]
 // Scale tables, as Q32 offsets within the octave. These are `const` and only
 // ever read, so flash is CORRECT for them - the opposite of sin_lut/pow2_lut
 // above. (WorkshopSpectral's kSmoothLut is the precedent.)
+// PING decay coefficients, Q20. Declared here rather than in ping.h because
+// the definition lives in shepard.cpp, which does not include ping.h - and a
+// definition that does not match a visible declaration links to nothing.
+extern const int32_t kPingDecay[];   // [17]
+
 extern const uint32_t kScale12[];    // [12] chromatic, 12-ET
 extern const uint32_t kScaleMaj[];   // [7]  major
 extern const uint32_t kScaleMin[];   // [7]  natural minor

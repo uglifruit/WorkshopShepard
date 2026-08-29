@@ -22,8 +22,8 @@
 // which is what the card DOES - the internal voice is octave-stacked sines,
 // and this is octave-stacked you.
 //
-// Costs no extra RAM: SPIRAL's delay buffer is idle in normal boot and this is
-// idle in alt-boot, so they share it.
+// The buffer is passed in rather than owned, so main.cpp keeps the single
+// large allocation in one place.
 
 #ifndef SHEPARD_OCTAVE_H_
 #define SHEPARD_OCTAVE_H_
@@ -36,9 +36,13 @@
 
 namespace shepard {
 
-// 32768 samples = 683 ms. Long enough that a slow head takes a while to lap,
-// short enough to share SPIRAL's buffer with room spare.
-static constexpr int kOctBits = 15;
+// 65536 samples = 1.365 s. The delay buffer is the card's one large
+// allocation, at 128 KB.
+//
+// A read head must stay within one crossfade window of the write pointer, and
+// the window is 16384 - so the buffer needs to be comfortably larger than
+// that. 65536 leaves three quarters of it as slack.
+static constexpr int kOctBits = 16;
 static constexpr int kOctLen = 1 << kOctBits;
 static constexpr uint32_t kOctMask = kOctLen - 1;
 
