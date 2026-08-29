@@ -510,6 +510,13 @@ class ShepardCard : public ComputerCard {
 
     source_mix_ = ClampQ15(stored_[0][2]);
 
+    // Page 2 X is read ONCE, here, and then used by exactly one parameter
+    // depending on the mode - decay in PING, stereo width otherwise.
+    // tools/ping_check.py::check_no_knob_collision counts readers of each
+    // stored_[page][knob] and fails if any knob drives two things, which is
+    // how the decay/quantise collision was found.
+    page2_x_ = stored_[1][1];
+
     // Quantisation mode from page-2 Main, 0..3. Same reasoning.
     scale_ = (stored_[1][0] * kScaleCount) >> 15;
     if (scale_ >= kScaleCount) scale_ = kScaleCount - 1;
@@ -560,9 +567,21 @@ class ShepardCard : public ComputerCard {
     shift_up_ = (defl >= 0);
 
     if (ping_mode_) {
-      // Page 2 Main sets the decay, from a short pluck to a long ring. The
-      // shift is inverted because a LARGER shift decays SLOWER.
-      int32_t idx = (stored_[1][0] * kPingDecaySteps) >> 15;
+      // Page 2 X sets the decay, from a short click to a long ring.
+      //
+      // NOT page 2 Main, which is QUANTISE and is shared with normal boot.
+      // Putting decay there too made one knob drive both: turning it up for a
+      // longer ring also walked the pole from smooth into chromatic, major,
+      // minor and finally pentatonic - so with a slow pole, consecutive
+      // triggers landed on the SAME scale degree and the pitch stopped
+      // changing. Reported as "it stops changing note when I change the
+      // length from a click", which is exactly that collision.
+      //
+      // Quantise is worth keeping on Main here: landing the strikes on a
+      // scale is one of the most playable things about this mode. Stereo
+      // width loses its knob in PING instead, which matters far less when
+      // striking discrete notes.
+      int32_t idx = (page2_x_ * kPingDecaySteps) >> 15;
       if (idx >= kPingDecaySteps) idx = kPingDecaySteps - 1;
       if (idx < 0) idx = 0;
       ping_decay_ = kPingDecay[idx];
@@ -649,7 +668,12 @@ class ShepardCard : public ComputerCard {
     // As master sweeps one octave the set shifts by exactly one layer slot.
     const uint32_t n = (uint32_t)layers_;
     oct_div_ = 0xFFFFFFFFu / n + 1u;              // 2^32 / n, one layer slot
-    width_div_ = ((uint32_t)stored_[1][1] << 17) / n;
+    // Stereo width. In PING mode page 2 X is the DECAY knob, so width is
+    // pinned to a fixed spread there rather than tracking it - otherwise
+    // lengthening the ring would also widen the image, the same class of
+    // collision that put decay and quantise on one knob.
+    const uint32_t width = ping_mode_ ? 12000u : (uint32_t)page2_x_;
+    width_div_ = (width << 17) / n;
     master_div_ = master_out_q32_ / n;
 
 
@@ -1013,6 +1037,7 @@ class ShepardCard : public ComputerCard {
   int32_t ping_decay_ = 32746;   // ~0.25 s
   bool strike_armed_ = false;
   bool strike_pending_ = false;
+  int32_t page2_x_ = 0;      // page 2 X, read once - see UpdateControl
   int32_t ctl_m_ = 0;        // pow2(master), shared across the split block
   uint32_t ctl_inc0_ = 0;    // layer 0 increment, likewise
 

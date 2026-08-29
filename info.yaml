@@ -76,7 +76,7 @@ summary: |
   window onto the moving stack. Trigger repeatedly and each ping comes from a
   different point on the pole, building a chord out of one rising structure, so
   the barber's pole becomes something you play rather than something you listen
-  to. Four voices, oldest stolen. Page-two Main sets the decay, 23ms to 1.8s.
+  to. Four voices, oldest stolen. Page-two X sets the decay, 17ms to 1.7s; Main still quantises.
   Patch Pulse Out 1 back to Pulse In 1 and it strikes itself once per octave.
   With Y clockwise the live input is gated by the ping envelope AND transposed
   to the struck pitches, so your own signal is what rings.<br><br>
@@ -215,11 +215,15 @@ controls:
           moved, so changing page never drops the volume.
     - when: Switch Up (page 2), PING alt-boot
       main:
+        name: QUANTISE
+        description: >
+          As in normal boot, so the strikes land on a scale - one of the most
+          playable things about this mode.
+      x:
         name: DECAY
         description: >
-          How long each ping rings, from a 23ms click to a 1.8s bell. Page one
-          is unchanged from normal boot, so the pole is driven the same way -
-          it is simply silent until struck.
+          How long each ping rings, from a 17ms click to a 1.7s bell. Stereo
+          width has no knob in PING and sits at a fixed modest spread.
 
   leds:
     - when: Normal running

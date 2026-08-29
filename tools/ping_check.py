@@ -320,6 +320,54 @@ def check_no_overflow():
     return ok
 
 
+def check_no_knob_collision():
+    """No knob may drive two parameters.
+
+    THE BUG THIS EXISTS FOR. Decay was put on page 2 Main without removing
+    QUANTISE from it, so one knob drove both. Turning it up for a longer ring
+    also walked the pole from smooth into chromatic, major, minor and finally
+    pentatonic - and with a slow pole consecutive triggers then landed on the
+    SAME scale degree. Reported as "it stops changing note when I change the
+    length from a click".
+
+    This is a SOURCE check rather than a numeric one, because the fault is in
+    the WIRING: two features reading the same stored_[page][knob]. No amount
+    of DSP testing would have found it.
+    """
+    print("  no knob drives two parameters:")
+    import os
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "main.cpp")
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.readlines()
+    except OSError:
+        print("    (main.cpp not readable - skipped)")
+        return True
+
+    # Drop // comments, so the notes describing this bug are not counted.
+    body = []
+    for line in raw:
+        cut = line.find("//")
+        body.append(line if cut < 0 else line[:cut])
+    src = "".join(body)
+
+    names = {0: "Main", 1: "X", 2: "Y"}
+    ok = True
+    for page in (0, 1):
+        for knob in (0, 1, 2):
+            token = "stored_[%d][%d]" % (page, knob)
+            reads = src.count(token) - src.count(token + " =")
+            if reads > 1:
+                ok = False
+                print("    page %d %-4s: %d readers  COLLISION"
+                      % (page + 1, names[knob], reads))
+    if ok:
+        print("    every knob reads into exactly one parameter  ok")
+    return ok
+
+
 def main():
     print(f"SHEPARD PING check: {PING_VOICES} voices")
     ok = check_pitch_frozen()
@@ -328,6 +376,7 @@ def main():
     ok &= check_no_overflow()
     ok &= check_voice_stealing()
     ok &= check_polyphony_headroom()
+    ok &= check_no_knob_collision()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

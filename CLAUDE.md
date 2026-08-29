@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — nineteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — twenty findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -656,6 +656,40 @@ still decays.
 That second one is the general point: **normalising for the worst case
 penalises the common case.** A soft clipper that never pins is there precisely
 so the rare pile-up can be allowed to hit it.
+
+### 20. One knob drove two parameters — decay AND quantise
+
+Reported as *"it's initially okay, but stops changing note when I change the
+length from a click"*. That sentence localises the fault precisely: the DECAY
+knob was affecting PITCH.
+
+When PING replaced SPIRAL I gave decay page 2 Main — **without removing
+quantise from it.** Both read `stored_[1][0]`, so one knob drove both:
+
+    0%   decay step  0    scale = smooth
+    50%  decay step  8    scale = major
+    100% decay step 16    scale = pentatonic
+
+Turning it up for a longer ring also walked the pole from smooth into
+chromatic, major, minor and finally pentatonic. With a slow pole, consecutive
+triggers then landed on the **same scale degree** — the pitch stopped changing.
+
+Decay moved to page 2 X. Quantise stays on Main, because landing strikes on a
+scale is one of the most playable things about the mode; stereo width loses its
+knob in PING instead, which matters far less when striking discrete notes.
+
+**A second collision was hiding behind the first:** page 2 X still fed
+`width_div_`, so decay would have widened the image. Page 2 X is now read once
+into `page2_x_` and used by exactly one parameter depending on mode.
+
+`ping_check.py::check_no_knob_collision` counts readers of every
+`stored_[page][knob]` in `main.cpp` and fails if any knob has more than one.
+It found the second collision immediately.
+
+**This is a class of bug no DSP test can reach.** Every numeric check was
+green — the decay was correct, the scales were correct, the pole advanced
+correctly. The fault was in the WIRING, and it needed a test that reads the
+source rather than the signal.
 
 ### The lesson, which is the same one four times
 

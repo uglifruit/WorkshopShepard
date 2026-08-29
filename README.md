@@ -186,7 +186,11 @@ something you listen to.
 | Main (page 1) | Pole speed — how fast the invisible climb moves between strikes |
 | X (page 1) | Density |
 | Y (page 1) | Source mix |
-| Main (page 2) | **Ping decay** — 17 ms click to a 1.7 s ring |
+| Main (page 2) | Quantise — as in normal boot, so strikes land on a scale |
+| **X (page 2)** | **Ping decay** — 17 ms click to a 1.7 s ring |
+
+Stereo width has no knob in PING (page 2 X is the decay), and sits at a fixed
+modest spread.
 
 Four voices, oldest stolen when all are busy, so the newest four strikes are
 always the ones sounding.
