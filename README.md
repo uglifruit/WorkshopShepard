@@ -39,8 +39,9 @@ siren rather than the illusion.
 The card does this two ways at once, and Y crossfades between them:
 
 - **Internal voice** — a bank of 3 to 12 sine oscillators.
-- **Live audio** — a Hilbert frequency shifter drags whatever is patched into
-  Audio In 1 through the same structure.
+- **Live audio** — a rising comb filter: narrow resonant bands on the same
+  octave-spaced frequencies as the oscillators, sweeping upward forever
+  through whatever is patched into Audio In 1.
 
 ## What to feed it
 
@@ -103,22 +104,33 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 | CV Out 1 | Master phase, a 0–5 V ramp — one cycle per octave |
 | CV Out 2 | Measured DSP load |
 
-## Why the live path sounds inharmonic
+## The rising comb
 
-**A frequency shifter is not a pitch shifter.** It moves every partial by the
-same number of *hertz*, where a pitch shifter multiplies every partial by the
-same *ratio*. Feed it a 200 Hz tone with harmonics at 400, 600 and 800, shift
-by 100 Hz, and they come back at 300, 500, 700 and 900 — ratios of 1.50, 1.25,
-1.17 and 1.13. The harmonic series is broken and the result rings and clangs.
+The live path is **N narrow resonant bandpasses** centred on exactly the same
+octave-spaced frequencies as the oscillator bank, weighted by exactly the same
+window. As the master phase glides, every band centre slides upward together —
+fading in at the bottom, out at the top — so the input is filtered by a comb
+that rises forever.
 
-That is inherent to the technique and is **not a fault**. It is what Risset's
-own tape pieces sound like, and it is why Y crossfades between the two sources
-rather than the shifter simply replacing the oscillators. Use the internal
-voice when the illusion should be smooth; bring in the shifter when it should
-have teeth.
+Because the band centres and the oscillator frequencies are the same numbers,
+the two sources sit on top of each other rather than beating, and Y crossfades
+between "the illusion played by sine tones" and "the illusion applied to your
+signal".
 
-The illusion still works, because the *shift amounts* are octave-spaced across
-the layers even though each individual layer is a linear shift.
+Feed it something with broadband content — noise, a pad, cymbals, a full mix.
+The comb needs energy across the spectrum to have something to find. A single
+sine will simply come and go as a band sweeps past it.
+
+A resonant band passes only a fraction of a broadband input, so the path has
+measured make-up gain: it sits within 1 dB of the internal voice.
+
+**This replaced a Hilbert frequency shifter**, which was the original design.
+A shifter moves every partial by the same number of *hertz* rather than the
+same *ratio*, so it broke the harmonic series and made the input
+unrecognisable — the relationship between what went in and what came out was
+inaudible. A comb keeps the source recognisable and applies the illusion to
+it, which is what "Shepard tones on live audio" should mean. It is also
+cheaper.
 
 ## Stepped modes
 

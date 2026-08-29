@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — ten findings, two of them my own fixes making things worse
+## Found on HARDWARE — eleven findings, two of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -319,6 +319,50 @@ deliberate nudge. Page 1 is live from boot, so nothing is dead at power-on.
 This also removed a duplicate: the separate `level_live_` latch that finding 2
 fixed is now subsumed by the general mechanism.
 
+### 11. The frequency shifter was replaced by a RISING COMB
+
+"I don't like the audio thru stream at all" — and the suggestion that came with
+it was better than the original design: process the input with very narrow
+bands at the same rising frequencies and relative intensities as the Shepard
+tones, so it becomes a comb filter that rises forever.
+
+That is right for a reason worth stating. A frequency shifter **transforms**
+the input into something unrelated; a comb **filters** it, so the source stays
+recognisable and the illusion is applied *to* it. The latter is what "Shepard
+tones on live audio" should mean.
+
+`comb.h`: N Chamberlin state-variable bandpasses, centres taken from the same
+`inc[]` the oscillators use, gains from the same window. Measured 27.7 dB
+rejection an octave either side — narrow enough to read as a comb tooth,
+broad enough to stay musical.
+
+It is also **cheaper** than what it replaced: ~264 cycles at N=12 stereo
+against ~510 for a Hilbert pair plus twelve complex modulators.
+
+Three things it needed:
+
+1. **Clamped centres.** The Chamberlin form is stable only while
+   `f = 2sin(πfc/SR) < 1`, i.e. below ~8 kHz. At N=12 the top layers sit at 14
+   and 28 kHz with real window gain (up to 0.43), so unclamped they blow up.
+   Clamped they pile up at 7.5 kHz and fall naturally quiet, because a 28 kHz
+   component driving a 7.5 kHz band produces almost nothing.
+
+2. **Q20 coefficients, and a hybrid tuning path.** In Q15 the coefficient for a
+   13.75 Hz band is 58, so quantisation is 29 cents of detuning — the bands
+   would drift off the oscillators they sit on and the sources would beat.
+   Q20 alone did not fix it: the sine TABLE is only 512 points across the
+   half-cycle, so a small angle resolves to a few LSBs whatever Q the result
+   is in. Below 750 Hz the coefficient is now computed directly from the
+   increment (`sin(x) ≈ x` to well under a cent there); above it the table
+   takes over, since the linear form diverges to 67 cents by 7 kHz. Worst
+   error is 3.0 cents at 13.75 Hz — inaudible and windowed away — and under
+   0.74 cents everywhere above 27.5 Hz.
+
+3. **Measured make-up gain.** A resonant band passes only a fraction of a
+   broadband input, so at the shifter's old input scaling the comb sat 13 dB
+   below the synth voice and Y read as a fade. `<< 5` puts it within 1 dB,
+   with 3.1 dB of headroom on noise.
+
 ### The lesson, which is the same one four times
 
 A test that begins *downstream* of the thing that is broken cannot see it.
@@ -531,7 +575,7 @@ the tail at every setting.
 |---|---|---|
 | `shepard.cpp` | `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, split divisor, illusion continuity |
 | `shepard.cpp` | `tools/quant_check.py` | scale tables, octave wrap, portamento direction, stepping |
-| `hilbert.cpp` | `tools/hilbert_check.py` | transfer function, quadrature, sideband rejection, both traps, MulQ30 |
+| `comb.h` | `tools/comb_check.py` | tuning accuracy, stability at every centre, selectivity, centres match the oscillators, level across the glide |
 | `spiral.h` | `tools/spiral_check.py` | shift ratio, crossfade, buffer bounds, loop stability at DC |
 | **whole chain** | **`tools/passthru_check.py`** | **end-to-end gain — run after ANY scaling change** |
 | whole engine | `tools/shepsim.py` | renders WAVs, and the seam analysis (below) |

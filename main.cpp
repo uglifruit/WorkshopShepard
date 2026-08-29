@@ -9,7 +9,7 @@
 // Structure:
 //   shepard.cpp   tables, window, scale quantisation  (tools/shepard_check.py,
 //                                                      tools/quant_check.py)
-//   hilbert.cpp   analytic pair coefficients          (tools/hilbert_check.py)
+//   comb.h        rising comb filter for live audio    (tools/comb_check.py)
 //   spiral.h      alt-boot pitch-shifting delay       (tools/spiral_check.py)
 //   main.cpp      panel, CV, LEDs, and the audio ISR
 //
@@ -39,7 +39,7 @@
 
 #include "fixed.h"
 #include "shepard.h"
-#include "hilbert.h"
+#include "comb.h"
 #include "spiral.h"
 
 using namespace shepard;
@@ -127,16 +127,10 @@ static constexpr int32_t kRateHigh = 2600;
 // As a Q32 phase increment at 48 kHz: 13.75 / 48000 * 2^32.
 static constexpr uint32_t kBaseInc = 1229782u;
 
-// Base frequency SHIFT for layer 0 of the live-audio path, as a Q32 phase
-// increment: 0.25 Hz. Layer i shifts by this doubled i times, so the stack
-// spans 0.25 Hz to ~1 kHz - inaudibly slow at the bottom, clearly shifted in
-// the middle, and windowed away at the top. See UpdateControl().
-static constexpr uint32_t kShiftBase = 22369u;
-
 class ShepardCard : public ComputerCard {
  public:
   ShepardCard() {
-    hilbert_.Init();
+    comb_.Init();
     spiral_.Init();
 
     boot_mute_ = kBootMute;
@@ -145,7 +139,6 @@ class ShepardCard : public ComputerCard {
 
     for (int i = 0; i < kMaxLayers; ++i) {
       osc_q32_[i] = 0;
-      mod_q32_[i] = 0;
       win_l_[i] = 0;
       win_r_[i] = 0;
     }
@@ -283,14 +276,16 @@ class ShepardCard : public ComputerCard {
     int32_t acc_l = 0;
     int32_t acc_r = 0;
 
-    // The live-audio path shares ONE analytic pair across every layer. See
-    // hilbert.h: N transforms would cost 12x for bit-identical results, and
-    // the layers must share it to stay phase-coherent.
-    int32_t hi = 0, hq = 0;
-    if (source_mix_ > 0) {
-      const int32_t in = sealed_ ? 0 : ((int32_t)AudioIn1() << 9);
-      hilbert_.Process(in, &hi, &hq);
-    }
+    // The live-audio path is a RISING COMB: N narrow resonant bandpasses on
+    // the same octave-spaced centres as the oscillators, weighted by the same
+    // window. See comb.h for why this replaced a frequency shifter.
+    //
+    // << 5 is MAKE-UP GAIN, measured not guessed. A resonant band only passes
+    // a fraction of a broadband input's energy, so at << 3 the comb sat 13 dB
+    // below the synth voice and Y read as a fade rather than a crossfade.
+    // << 5 puts it at rms 396 against the synth's 443 - within 1 dB - with
+    // 3.1 dB of headroom left on a noise input.
+    const int32_t in = sealed_ ? 0 : ((int32_t)AudioIn1() << 5);
 
     for (int i = 0; i < active_layers_; ++i) {
       // --- internal voice ---
@@ -300,42 +295,18 @@ class ShepardCard : public ComputerCard {
         synth = SinQ15(osc_q32_[i]);
       }
 
-      // --- live audio, frequency-shifted ---
-      int32_t shifted = 0;
+      // --- live audio, band-filtered ---
+      // This band's centre IS this layer's oscillator frequency, so the comb
+      // tooth and the sine sit exactly together: the two sources reinforce
+      // rather than beating against each other.
+      int32_t filtered = 0;
       if (source_mix_ > 0) {
-        mod_q32_[i] += mod_inc_[i];
-        const int32_t c = SinQ15(mod_q32_ [i] + 0x40000000u);   // cos
-        const int32_t s = SinQ15(mod_q32_[i]);                  // sin
-        // Sign of the Q term sets the direction. One flip, not two code paths.
-        const int32_t q = shift_up_ ? hq : -hq;
-
-        // Scale the analytic pair to FULL Q15 before modulating, so the live
-        // path meets the synth path at the same level in the crossfade below.
-        //
-        // The input is left-shifted by 9 for the Hilbert filter's precision
-        // (its Q30 coefficients need the headroom). Shifting by the same 9
-        // here would exactly undo that, leaving the live signal at its raw
-        // +-2048 while SinQ15 delivers +-32767 - a 24 dB mismatch, so Y read
-        // as a fade to almost nothing rather than as a crossfade.
-        //
-        // Observed on hardware as "feeding audio in and changing blend gives
-        // a very quiet signal". >> 5 instead: +-2^20 becomes +-32768, which
-        // is full Q15 and matches the oscillator.
-        //
-        // No halving of the pair. The two quadrature terms are 90 degrees
-        // apart, so they sum to a CONSTANT magnitude rather than adding
-        // coherently - I*cos + Q*sin is a rotation, not a doubling. Halving it
-        // cost 6 dB for nothing and was half the reason the shifter was hard to
-        // hear at all.
-        //
-        // Measured with a full-scale input: rms 446 against the synth path's
-        // 443, with 2.6 dB of headroom. Moderate inputs sit well below.
-        shifted = MulQ15(hi >> 5, c) + MulQ15(q >> 5, s);
+        filtered = comb_.Process(i, in, comb_f_[i]);
       }
 
       // Crossfade the two sources, then apply this layer's window gain.
       const int32_t v = MulQ15(synth, 32767 - source_mix_) +
-                        MulQ15(shifted, source_mix_);
+                        MulQ15(filtered, source_mix_);
 
       acc_l += MulQ15(v, win_l_[i]);
       acc_r += MulQ15(v, win_r_[i]);
@@ -555,29 +526,6 @@ class ShepardCard : public ComputerCard {
     // up cost 0.003 cents of tuning, far below the LUT's own 0.0016.
     const uint32_t inc0 = ((kBaseInc >> 5) * (uint32_t)(m >> 15)) >> 10;
 
-    // Shift amount for the live path.
-    //
-    // This TRACKS THE MASTER PHASE, not the glide rate. Tying it to the rate
-    // was the original design and it made the shifter inaudible: at normal
-    // glide speeds the shifts came out at 0.0017-3.5 Hz, so nothing perceptibly
-    // happened to the input. A frequency shifter needs tens of Hz before the
-    // ear registers it at all.
-    //
-    // Deriving it from the master instead gives the shift its own Shepard
-    // glide: shift_base doubles across an octave and halves back at the wrap,
-    // exactly as inc0 does, so the same window fades each layer's shift in and
-    // out and the same phase rotation keeps it seamless.
-    //
-    //     layer 0    0.25 - 0.5 Hz    inaudibly slow, as it should be
-    //     layer 4    4 - 8 Hz         a slow throb
-    //     layer 8    64 - 128 Hz      clearly shifted
-    //     layer 11   512 - 1024 Hz    far out of tune, but windowed away
-    //
-    // Stationary at noon still shifts - which is correct and is the point:
-    // the shifter is an effect ON the input, not a function of movement.
-    const uint32_t shift_base =
-        (uint32_t)(((kShiftBase >> 5) * (uint32_t)(m >> 15)) >> 10);
-
     // Window-position divisors, computed once per control block rather than
     // per layer.
     //
@@ -648,7 +596,7 @@ class ShepardCard : public ComputerCard {
       if (inc > 0x7FFFFFFFu) inc = 0x7FFFFFFFu;
       inc_[i] = inc;
 
-      mod_inc_[i] = shift_base << i;
+      comb_f_[i] = CombBank::TuneFromInc(inc);
 
       // Window position: u_i = (master_frac + i) / layers.
       //
@@ -893,7 +841,7 @@ class ShepardCard : public ComputerCard {
     }
   }
 
-  Hilbert hilbert_;
+  CombBank comb_;
   SpiralDelay spiral_;
 
   int32_t boot_mute_;
@@ -916,9 +864,8 @@ class ShepardCard : public ComputerCard {
 
   // Oscillator bank state.
   uint32_t osc_q32_[kMaxLayers];
-  uint32_t mod_q32_[kMaxLayers];
   uint32_t inc_[kMaxLayers];
-  uint32_t mod_inc_[kMaxLayers];
+  int32_t comb_f_[kMaxLayers];
   int16_t win_l_[kMaxLayers];
   int16_t win_r_[kMaxLayers];
 
@@ -937,7 +884,7 @@ class ShepardCard : public ComputerCard {
   int32_t inv_sqrt_n_ = 13377;
   int scale_ = 0;
   int32_t source_mix_ = 0;
-  bool shift_up_ = true;
+  bool shift_up_ = true;   // glide direction, for Pulse In 1 stepping
 
   // SPIRAL state.
   uint32_t spiral_rate_q16_ = 65536;

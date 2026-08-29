@@ -72,22 +72,10 @@ SCALE_MAJ = [0x00000000, 0x2AAAAAAB, 0x55555555, 0x6AAAAAAB,
 SCALE_PENT = [0x00000000, 0x2AAAAAAB, 0x55555555, 0x95555555, 0xC0000000]
 SCALES = {0: None, 1: SCALE12, 2: SCALE_MAJ, 3: SCALE_PENT}
 
-HILBERT_A = [514752760, 940832379, 1048613629, 1071056573]
-HILBERT_B = [173686851, 787083661, 1015061606, 1063647790]
-
-
 def mul_q15(w, x):
     hi = x >> 15
     lo = x - (hi << 15)
     return w * hi + ((w * lo) >> 15)
-
-
-def mul_q30(a, x):
-    ah = a >> 15
-    al = a & 0x7FFF
-    xh = x >> 15
-    xl = x - (xh << 15)
-    return ah * xh + ((ah * xl) >> 15) + ((al * xh) >> 15)
 
 
 def sin_q15(phase):
@@ -142,33 +130,46 @@ def snap_to_scale(pos, scale):
     return below if d_below <= d_above else above
 
 
-class Hilbert:
-    """The analytic-signal pair from hilbert.h."""
+COMB_Q = 2000
+COMB_MAX_INC = 671088640
+
+
+def mul_q20(w, x):
+    hi = x >> 15
+    lo = x - (hi << 15)
+    return ((w * hi) >> 5) + ((w * lo) >> 20)
+
+
+def tune_from_inc(inc):
+    """CombBank::TuneFromInc - Q20, linear below 750 Hz, table above."""
+    if inc > COMB_MAX_INC:
+        inc = COMB_MAX_INC
+    if inc < (1 << 26):
+        f = ((inc >> 11) * 205887) >> 16
+    else:
+        idx = (inc >> 23) & 0x1FF
+        frac = (inc >> 8) & 0x7FFF
+        s0 = SIN_LUT[idx]
+        s1 = SIN_LUT[(idx + 1) & 1023]
+        sn = s0 + mul_q15(frac, s1 - s0)
+        f = (sn << 1) * 32
+    kmax = 2 << 20
+    return kmax if f > kmax else (1 if f < 1 else f)
+
+
+class CombBank:
+    """The rising comb from comb.h."""
 
     def __init__(self):
-        self.a = [[0, 0, 0, 0] for _ in HILBERT_A]   # x1 x2 y1 y2
-        self.b = [[0, 0, 0, 0] for _ in HILBERT_B]
-        self.delay = 0
+        self.lp = [0] * MAX_LAYERS
+        self.bp = [0] * MAX_LAYERS
 
-    @staticmethod
-    def _section(s, x, a2):
-        y = mul_q30(a2, x + s[3]) - s[1]
-        s[1] = s[0]
-        s[0] = x
-        s[3] = s[2]
-        s[2] = y
-        return y
+    def process(self, i, x, f):
+        self.lp[i] += mul_q20(f, self.bp[i])
+        hp = x - self.lp[i] - mul_q15(COMB_Q, self.bp[i])
+        self.bp[i] += mul_q20(f, hp)
+        return self.bp[i]
 
-    def process(self, x):
-        a = x
-        for k, c in enumerate(HILBERT_A):
-            a = self._section(self.a[k], a, c)
-        b = x
-        for k, c in enumerate(HILBERT_B):
-            b = self._section(self.b[k], b, c)
-        i_out = self.delay
-        self.delay = a
-        return i_out, b
 
 
 class Engine:
@@ -183,9 +184,8 @@ class Engine:
         self.source_mix = source_mix
 
         self.osc = [0] * MAX_LAYERS
-        self.mod = [0] * MAX_LAYERS
         self.inc = [0] * MAX_LAYERS
-        self.mod_inc = [0] * MAX_LAYERS
+        self.comb_f = [0] * MAX_LAYERS
         self.win_l = [0] * MAX_LAYERS
         self.win_r = [0] * MAX_LAYERS
 
@@ -195,7 +195,7 @@ class Engine:
         self.active = layers
         self.inv_sqrt = INV_SQRT_N[layers]
         self.prev_master = None
-        self.hilbert = Hilbert()
+        self.comb = CombBank()
         self.rate = 0
         self.shift_up = True
 
@@ -225,10 +225,6 @@ class Engine:
         m = pow2_q30(self.master_out)
         inc0 = ((BASE_INC >> 5) * (m >> 15)) >> 10
 
-        # Master-tracked, not rate-tracked - see UpdateControl(). Tying it to
-        # the rate made the shifter inaudible (0.0017-3.5 Hz).
-        SHIFT_BASE = 22369
-        shift_base = ((SHIFT_BASE >> 5) * (m >> 15)) >> 10
 
         n = self.layers
         od = (0xFFFFFFFF // n) + 1
@@ -258,7 +254,7 @@ class Engine:
             if inc > 0x7FFFFFFF:
                 inc = 0x7FFFFFFF
             self.inc[i] = inc
-            self.mod_inc[i] = (shift_base << i) & 0xFFFFFFFF
+            self.comb_f[i] = tune_from_inc(inc)
             u_l = (md + i * od) & 0xFFFFFFFF
             u_r = (u_l + wd) & 0xFFFFFFFF
             self.win_l[i] = hann_q15(u_l)
@@ -272,10 +268,7 @@ class Engine:
             if (k & 31) == 0:
                 self.update_control()
 
-            hi = hq = 0
-            if self.source_mix > 0:
-                x = (audio_in[k] << 9) if audio_in else 0
-                hi, hq = self.hilbert.process(x)
+            comb_in = (audio_in[k] << 5) if audio_in else 0
 
             acc_l = 0
             acc_r = 0
@@ -285,16 +278,12 @@ class Engine:
                     self.osc[i] = (self.osc[i] + self.inc[i]) & 0xFFFFFFFF
                     synth = sin_q15(self.osc[i])
 
-                shifted = 0
+                filtered = 0
                 if self.source_mix > 0:
-                    self.mod[i] = (self.mod[i] + self.mod_inc[i]) & 0xFFFFFFFF
-                    c = sin_q15((self.mod[i] + 0x40000000) & 0xFFFFFFFF)
-                    s = sin_q15(self.mod[i])
-                    q = hq if self.shift_up else -hq
-                    shifted = mul_q15(hi >> 5, c) + mul_q15(q >> 5, s)
+                    filtered = self.comb.process(i, comb_in, self.comb_f[i])
 
                 v = (mul_q15(synth, 32767 - self.source_mix) +
-                     mul_q15(shifted, self.source_mix))
+                     mul_q15(filtered, self.source_mix))
                 acc_l += mul_q15(v, self.win_l[i])
                 acc_r += mul_q15(v, self.win_r[i])
 
@@ -475,7 +464,7 @@ def render_width(seconds=6.0):
 
 
 def make_test_input(n, kind):
-    """Source material for the Hilbert path."""
+    """Source material for the live-audio path."""
     sig = []
     if kind == "drone":
         for k in range(n):
@@ -496,7 +485,7 @@ def make_test_input(n, kind):
     return sig
 
 
-def render_hilbert(seconds=8.0):
+def render_comb(seconds=8.0):
     """The live-audio path.
 
     Expect it to be INHARMONIC - a frequency shifter moves partials by hertz
@@ -513,7 +502,7 @@ def render_hilbert(seconds=8.0):
         e = Engine(layers=8, source_mix=32767)
         e.set_rate(0.25)
         l, r = e.render(n, audio_in=src)
-        name = f"out_hilbert_{kind}.wav"
+        name = f"out_comb_{kind}.wav"
         write_wav(name, l, r)
         out.append(name)
 
@@ -522,8 +511,8 @@ def render_hilbert(seconds=8.0):
     e = Engine(layers=8, source_mix=16384)
     e.set_rate(0.25)
     l, r = e.render(n, audio_in=src)
-    write_wav("out_hilbert_blend50.wav", l, r)
-    out.append("out_hilbert_blend50.wav")
+    write_wav("out_comb_blend50.wav", l, r)
+    out.append("out_comb_blend50.wav")
     return out
 
 
@@ -753,7 +742,7 @@ def main():
         names += render_density()
         names += render_scales()
         names += render_width()
-        names += render_hilbert()
+        names += render_comb()
 
     if args.spectrogram:
         spectrograms(names)

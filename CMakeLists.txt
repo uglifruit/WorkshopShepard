@@ -22,8 +22,7 @@ pico_sdk_init()
 
 add_executable(${CARD_NAME}
   main.cpp
-  shepard.cpp
-  hilbert.cpp)
+  shepard.cpp)
 
 # -Wdouble-promotion and -Wfloat-conversion are not cosmetic here. The RP2040
 # has no FPU, so a single float in the audio path costs ~360ns against a 20.8us
