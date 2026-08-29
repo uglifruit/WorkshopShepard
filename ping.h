@@ -38,24 +38,33 @@ namespace shepard {
 // to what normal boot already runs.
 static constexpr int kPingVoices = 4;
 
-// Decay coefficients, Q20, one per knob step. The envelope is multiplied by
-// one of these every sample.
+// Decay coefficients, Q15, one per knob step. The envelope is multiplied by
+// one of these every sample, via MulQ15.
 //
-// A SHIFT will not do here, and the reason is worth recording. `env -= env >>
-// n` looks like the obvious one-pole, but the envelope is only 15 bits, so
-// `env >> 17` is ZERO for every value it can hold - the decay never even
-// begins and the voice rings forever. Anything above ~14 stalls outright, and
-// the usable shifts below that give a coarse, unevenly spaced range.
+// TWO WRONG APPROACHES, both worth recording because each looked right:
 //
-// So: a table of multipliers, exponentially spaced by ear, and the envelope
-// runs in Q24 internally (Q15 audio << 9) so the multiply has room to work.
-// Measured decay times, 17 ms to 2.0 s:
+//   A SHIFT. `env -= env >> n` is the obvious one-pole and it does not work
+//   here: the envelope is 15 bits, so `env >> 17` is ZERO for every value it
+//   can hold - the decay never begins and the voice rings forever. Anything
+//   above ~14 stalls outright.
 //
-//     [0]  0.017 s   a click
-//     [4]  0.058 s   a pluck
-//     [8]  0.195 s   a short bell
-//    [12]  0.641 s   a bell
-//    [16]  2.049 s   a long ring
+//   A BESPOKE Q20 MULTIPLY. Splitting env at bit 12 made the high term
+//   4095 * 1048497 = 4.29e9, twice int32's limit - it wrapped NEGATIVE, the
+//   envelope collapsed on its first sample, and every ping was a click
+//   regardless of the knob. Moving the split to 15 fixed that term and broke
+//   the other one (lo * c reaching 3.4e10). There is no single split that
+//   works: hi needs s < 11 and lo needs s > 13.
+//
+// So: MulQ15, which is already proven safe for |x| up to 20e6 against an
+// envelope peaking at 16.8e6, with the envelope carried in Q24 so a
+// coefficient just under 1.0 still has bits to bite on. Measured 11 ms to
+// 1.7 s:
+//
+//     [0]  0.011 s   a click
+//     [4]  0.040 s   a pluck
+//     [8]  0.137 s   a short bell
+//    [12]  0.458 s   a bell
+//    [16]  1.716 s   a long ring
 // The table itself is declared in shepard.h and defined in shepard.cpp.
 static constexpr int kPingDecaySteps = 17;
 
@@ -118,14 +127,17 @@ class PingVoice {
   int32_t __not_in_flash_func(WinR)(int i) const { return win_r_[i]; }
 
   // Advance the envelope. Call once per sample per voice.
-  void __not_in_flash_func(Tick)(int32_t decay_q20) {
+  void __not_in_flash_func(Tick)(int32_t decay_q15) {
     if (!active_) return;
     if (target_ > 0) {
       // Attack, then release once it has arrived.
       env_ += (target_ - env_) >> kPingAttack;
       if (env_ > kPingEnvFull - (kPingEnvFull >> 6)) target_ = 0;
     } else {
-      env_ = MulQ20Env(env_, decay_q20);
+      // MulQ15, not a bespoke multiply. Two attempts at a wider one both
+      // OVERFLOWED int32 - see the note on kPingDecay - and MulQ15 is already
+      // proven safe for |x| up to 20e6, where the envelope peaks at 16.8e6.
+      env_ = MulQ15(decay_q15, env_);
       // A one-pole never truly reaches zero, so retire the voice when it is
       // inaudible rather than leaving it running forever and stealing a slot.
       if (env_ < (8 << kPingEnvShift)) {
@@ -134,16 +146,6 @@ class PingVoice {
       }
     }
     ++age_;
-  }
-
-  // (env * c) >> 20 without a 64-bit multiply. env is at most 2^24 and c is at
-  // most 2^20, so the exact product needs 44 bits - the same hi/lo split as
-  // MulQ15 keeps it in int32.
-  static inline int32_t __not_in_flash_func(MulQ20Env)(int32_t env,
-                                                       int32_t c) {
-    const int32_t hi = env >> 12;
-    const int32_t lo = env - (hi << 12);
-    return ((hi * c) >> 8) + ((lo * c) >> 20);
   }
 
   // One layer's oscillator contribution, already enveloped.
@@ -188,8 +190,8 @@ class PingBank {
 
   PingVoice& __not_in_flash_func(Voice)(int v) { return voice_[v]; }
 
-  void __not_in_flash_func(Tick)(int32_t decay_q20) {
-    for (int v = 0; v < kPingVoices; ++v) voice_[v].Tick(decay_q20);
+  void __not_in_flash_func(Tick)(int32_t decay_q15) {
+    for (int v = 0; v < kPingVoices; ++v) voice_[v].Tick(decay_q15);
   }
 
   bool __not_in_flash_func(AnyActive)() const {

@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — seventeen findings, three of them my own fixes making things worse
+## Found on HARDWARE — eighteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -588,6 +588,37 @@ against a 2047 rail. With it, worst case 1746.
 
 `spiral.h` and `spiral_check.py` removed; `SoftClipOut` moved to `fixed.h`
 where it belongs, and the delay buffer is now owned by the octave stack alone.
+
+### 18. The ping envelope overflowed int32 — and Python could not see it
+
+Reported as *"the ping is very short - it's just a click"*. It was: the
+envelope collapsed on its first sample and never rang at all.
+
+`MulQ20Env` split the envelope at bit 12, so the high term was
+`(env >> 12) * c` — worst case **4095 × 1048497 = 4.29e9, twice int32's
+limit.** It wrapped negative and the envelope died instantly, regardless of
+what the decay knob said.
+
+**The test could not have caught it.** `ping_check.py` mirrored the same
+arithmetic and passed, because **Python integers are arbitrary precision** —
+the identical expression is simply correct there. Fixed-width overflow is
+invisible to a Python mirror unless it is asserted explicitly.
+
+Moving the split to 15 fixed that term and broke the other: `lo * c` reached
+3.4e10. There is no single split point that works — the high term needs
+`s < 11`, the low term needs `s > 13`.
+
+Resolved by not writing a bespoke multiply at all. `MulQ15` is already proven
+safe for `|x|` up to 20e6 against an envelope peaking at 16.8e6, and the
+envelope stays in Q24 so a coefficient just under 1.0 still has bits to bite
+on. Measured 17 ms to 1.72 s, with **2.0× overflow headroom**.
+
+`ping_check.py::check_no_overflow` now asserts every partial product against
+`INT32_MAX` explicitly, and separately proves the envelope still holds value
+after 200 samples rather than having collapsed. That is the shape of test a
+Python mirror needs for fixed-width arithmetic: the mirror shows what the
+maths *should* do, and a bounds assertion shows whether the *type* can hold
+it.
 
 ### The lesson, which is the same one four times
 

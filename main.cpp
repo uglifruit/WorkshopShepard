@@ -954,7 +954,7 @@ class ShepardCard : public ComputerCard {
   bool shift_up_ = true;   // glide direction, for Pulse In 1 stepping
 
   // SPIRAL state.
-  int32_t ping_decay_ = 1048078;   // ~0.36 s
+  int32_t ping_decay_ = 32746;   // ~0.25 s
 
   bool freeze_ = false;
   bool gate_freeze_ = false;

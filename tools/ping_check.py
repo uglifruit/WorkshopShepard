@@ -27,9 +27,9 @@ PING_ENV_FULL = 32767 << PING_ENV_SHIFT
 
 # Q20 decay coefficients from shepard.cpp - a SHIFT cannot work here, see the
 # note in ping.h: env >> 17 is zero for every value a 15-bit envelope holds.
-PING_DECAY = [1038030, 1040798, 1042842, 1044350, 1045461, 1046281,
-              1046885, 1047330, 1047658, 1047900, 1048078, 1048209,
-              1048306, 1048377, 1048429, 1048468, 1048497]
+PING_DECAY = [32275, 32407, 32503, 32574, 32626, 32664,
+              32692, 32713, 32727, 32738, 32746, 32752,
+              32756, 32760, 32762, 32763, 32765]
 BASE_INC = 1229782
 
 SIN_LUT = [int(round(math.sin(2.0 * math.pi * i / 1024) * 32767.0))
@@ -79,9 +79,7 @@ class Voice:
             if self.env > PING_ENV_FULL - (PING_ENV_FULL >> 6):
                 self.target = 0
         else:
-            hi = self.env >> 12
-            lo = self.env - (hi << 12)
-            self.env = ((hi * decay_q20) >> 8) + ((lo * decay_q20) >> 20)
+            self.env = mul_q15(decay_q20, self.env)
             if self.env < (8 << PING_ENV_SHIFT):
                 self.env = 0
                 self.active = False
@@ -273,11 +271,58 @@ def check_polyphony_headroom():
     return ok
 
 
+def check_no_overflow():
+    """Every intermediate in the envelope multiply must fit int32.
+
+    THE BUG THIS EXISTS FOR, and the reason it reached hardware: a Python
+    mirror CANNOT catch fixed-width overflow, because Python integers are
+    arbitrary precision. The same arithmetic that wrapped negative on the
+    RP2040 was simply correct in the test.
+
+    MulQ20Env originally split env at bit 12, making the high term
+    (env >> 12) * c - worst case 4095 * 1048497 = 4.29e9, twice int32's limit.
+    It wrapped negative, the envelope collapsed on its first sample, and every
+    ping was a click regardless of the decay setting.
+
+    So: assert the products explicitly, against the type's real limit.
+    """
+    print("  envelope multiply fits int32:")
+    ok = True
+    INT32_MAX = 2147483647
+    c_max = max(PING_DECAY)
+    # MulQ15(w, x): the terms are w*(x>>15) and w*(x - ((x>>15)<<15)).
+    worst = 0
+    for env in (PING_ENV_FULL, PING_ENV_FULL - 1, PING_ENV_FULL // 2, 4096, 8):
+        hi = env >> 15
+        lo = env - (hi << 15)
+        worst = max(worst, abs(c_max * hi), abs(c_max * lo))
+    print(f"    worst MulQ15 partial product = {worst:12d}")
+    print(f"    int32 limit                  = {INT32_MAX:12d}")
+    if worst > INT32_MAX:
+        ok = False
+        print("    OVERFLOWS - the envelope will wrap negative and collapse")
+    else:
+        print(f"    {INT32_MAX / worst:.1f}x headroom  ok")
+
+    # And prove the envelope actually decays rather than collapsing.
+    v = Voice()
+    v.strike(1, [BASE_INC])
+    for _ in range(200):
+        v.tick(PING_DECAY[16])
+    if v.env <= 0:
+        ok = False
+        print("    ENVELOPE COLLAPSED - not a decay, a click")
+    else:
+        print(f"    envelope still {v.env} after 200 samples  ok")
+    return ok
+
+
 def main():
     print(f"SHEPARD PING check: {PING_VOICES} voices")
     ok = check_pitch_frozen()
     ok &= check_strikes_differ()
     ok &= check_envelope()
+    ok &= check_no_overflow()
     ok &= check_voice_stealing()
     ok &= check_polyphony_headroom()
     print("PASS" if ok else "FAIL")
