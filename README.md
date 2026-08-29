@@ -199,6 +199,11 @@ always the ones sounding.
 octave — a self-playing instrument whose pitch sequence never repeats within a
 cycle. Or drive Pulse In 1 from anything else to play it deliberately.
 
+Note that Pulse In 1 does **not** freeze the pole in this mode — it is the
+strike trigger here, and the pole keeps climbing underneath regardless of how
+fast you play. The Down switch still freezes it by hand, which holds the pole
+still so every strike gives the same chord.
+
 With Y clockwise the live input is **gated by the ping envelope and transposed
 to the struck pitches**, so your own signal is what rings — the pole's pitch
 appears in your source material rather than alongside it.

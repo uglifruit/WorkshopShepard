@@ -368,6 +368,60 @@ def check_no_knob_collision():
     return ok
 
 
+def check_trigger_does_not_freeze():
+    """In PING, the strike trigger must NOT also freeze the pole.
+
+    THE BUG THIS EXISTS FOR. Pulse In 1 is the freeze GATE in normal boot and
+    the strike TRIGGER in PING - and both behaviours were wired to it, so the
+    same pulse that voiced a ping also stopped the pole climbing.
+
+    It presented as depending on the DECAY knob, because a longer decay means
+    retriggering sooner, which means the gate is high a greater fraction of
+    the time. The decay was innocent. Reported as "the background climb ISN'T
+    happening when the note is ringing".
+
+    A source check, like the knob-collision one: the fault is in the wiring,
+    not in any number.
+    """
+    print("  the strike trigger does not freeze the pole:")
+    import os
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "main.cpp")
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.readlines()
+    except OSError:
+        print("    (main.cpp not readable - skipped)")
+        return True
+
+    body = []
+    for line in raw:
+        cut = line.find("//")
+        body.append(line if cut < 0 else line[:cut])
+    src = "".join(body)
+
+    ok = True
+    if "gate_freeze_ = pulse1;" in src:
+        ok = False
+        print("    gate_freeze_ takes pulse1 unconditionally  FAIL")
+        print("    (in PING that freezes the pole on every strike)")
+    elif "gate_freeze_ = ping_mode_ ? false : pulse1;" in src:
+        print("    gated on ping_mode_ - pole climbs unconditionally  ok")
+    else:
+        ok = False
+        print("    gate_freeze_ assignment not recognised  FAIL")
+
+    # The switch-latched freeze SHOULD still work in PING: holding the pole
+    # still so every strike gives the same chord is a real control.
+    if "freeze_ = freeze_latch_ || gate_freeze_;" in src:
+        print("    switch freeze still active in PING  ok")
+    else:
+        ok = False
+        print("    switch freeze path changed unexpectedly  FAIL")
+    return ok
+
+
 def main():
     print(f"SHEPARD PING check: {PING_VOICES} voices")
     ok = check_pitch_frozen()
@@ -377,6 +431,7 @@ def main():
     ok &= check_voice_stealing()
     ok &= check_polyphony_headroom()
     ok &= check_no_knob_collision()
+    ok &= check_trigger_does_not_freeze()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

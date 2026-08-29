@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twenty findings, three of them my own fixes making things worse
+## Found on HARDWARE — twenty-one findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -690,6 +690,37 @@ It found the second collision immediately.
 green — the decay was correct, the scales were correct, the pole advanced
 correctly. The fault was in the WIRING, and it needed a test that reads the
 source rather than the signal.
+
+### 21. The strike trigger was also freezing the pole
+
+*"The background (invisible) climb ISN'T happening when the note is ringing.
+So if the next trigger is before the note has decayed away there is no climb."*
+A precise diagnosis, and the cause was one line.
+
+Pulse In 1 is the freeze GATE in normal boot and the strike TRIGGER in PING —
+and `gate_freeze_ = pulse1` applied **both** behaviours in both modes. So the
+pulse that voiced a ping also stopped the pole climbing, for as long as the
+gate stayed high.
+
+It presented as a decay-knob problem because a longer decay means retriggering
+sooner, which means the gate is high a greater fraction of the time. **The
+decay was innocent both times** — first the quantise collision, now this.
+
+Fixed: `gate_freeze_ = ping_mode_ ? false : pulse1`. In PING the pole climbs
+unconditionally, which is the entire idea.
+
+The switch-latched freeze deliberately still works in PING: holding the pole
+still so every strike gives the same chord is a real performance control, and
+SEALED silencing the live input is coherent there too. Only the GATE was wrong.
+
+`ping_check.py::check_trigger_does_not_freeze` asserts both halves — that the
+gate is mode-conditional, and that the switch freeze path is untouched.
+
+**Second source-level bug in a row**, after the knob collision. Both were
+invisible to every numeric test because the DSP was correct in each case; what
+was wrong was which control fed what. Worth remembering when a card gains a
+mode: the new mode reuses jacks and knobs that already mean something, and the
+old meaning does not switch itself off.
 
 ### The lesson, which is the same one four times
 

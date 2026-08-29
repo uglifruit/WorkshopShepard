@@ -882,7 +882,22 @@ class ShepardCard : public ComputerCard {
     const bool pulse1 = PulseIn1();
     if (pulse1 && !last_pulse1_) ++trigger_count_;
     last_pulse1_ = pulse1;
-    gate_freeze_ = pulse1;
+
+    // Pulse In 1 freezes the stack while high in NORMAL boot - but NOT in
+    // PING, where the same jack is the strike trigger.
+    //
+    // Without this exception the pulse that voices a ping also stops the pole
+    // climbing, so the pole is frozen for as long as the gate is high. That
+    // read on hardware as "the background climb isn't happening when the note
+    // is ringing" - and it appeared to depend on the DECAY setting, because a
+    // longer decay means retriggering sooner, which means the gate is high a
+    // greater fraction of the time. The decay knob was innocent; the gate was
+    // holding the pole.
+    //
+    // In PING the pole must climb unconditionally. That is the entire idea:
+    // an invisible barber's pole running underneath, sampled wherever it has
+    // reached at each strike.
+    gate_freeze_ = ping_mode_ ? false : pulse1;
 
     freeze_ = freeze_latch_ || gate_freeze_;
     sealed_ = sealed_latch_ && !gate_freeze_;
