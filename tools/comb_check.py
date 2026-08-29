@@ -22,7 +22,7 @@ import sys
 SR = 48000
 MIN_LAYERS = 3
 MAX_LAYERS = 12
-COMB_Q = 2000
+COMB_Q = 8192
 COMB_MAX_INC = 671088640          # 7500 Hz as a Q32 increment
 BASE_INC = 1229782                # 13.75 Hz
 
@@ -141,7 +141,9 @@ def check_selectivity():
         off = max(abs(v) for v in run_band(f, fc * ratio)[6000:])
         rej = 20 * math.log10(centre / off) if off else 99
         print(f"    {label:18s} {rej:5.1f} dB down")
-        if ratio in (0.5, 2.0) and rej < 15.0:
+        # Q~4 gives ~15.5 dB an octave out. Deliberately broad: see the note
+        # on kCombQ. Anything under 10 would stop reading as a comb at all.
+        if ratio in (0.5, 2.0) and rej < 10.0:
             ok = False
     print(f"    {'ok' if ok else 'FAIL - too broad to read as a comb'}")
     return ok
@@ -220,7 +222,7 @@ def check_resonant_gain():
     """An on-centre tone must pass at roughly UNITY, not be boosted.
 
     THE BUG THIS EXISTS FOR. A resonant bandpass boosts a tone sitting on its
-    centre by roughly 32768/q - about 16x at kCombQ = 2000. Unnormalised, a
+    centre by roughly 32768/q - about 4x at kCombQ = 8192. Unnormalised, a
     sustained drone drove the output accumulator to a peak of 7939 against a
     2047 rail with 48% of samples clipping, and the card sounded "very very
     distorted".
@@ -310,6 +312,57 @@ def check_retune_ringout():
     return ok
 
 
+def check_sweep_envelope():
+    """A band sweeping past a fixed partial must FADE, not switch.
+
+    THE PROPERTY THIS EXISTS FOR. The window fades each band in and out
+    correctly, but at high Q the filter's own resonance curve is far steeper
+    than the window and dominates the envelope - so a sustained tone appeared
+    abruptly, sounded briefly and vanished, instead of swelling and receding.
+
+    Reported as bands with a "hard start/stop" where a fade was expected. The
+    window was innocent; the resonance was too narrow for something that MOVES
+    an octave per cycle.
+
+    This measures how much of the octave a fixed tone stays audible for, and
+    how steep the steepest transition is.
+    """
+    print("  sweep envelope (a band passing a fixed partial):")
+    ok = True
+    N = 3
+    tone = 55.0
+    Q = 32768.0 / COMB_Q
+
+    resp = []
+    for step in range(400):
+        m = step / 400.0
+        total = 0.0
+        for i in range(N):
+            fc = 13.75 * (2 ** (m + i))
+            w = math.sin(math.pi * (((m + i) / N) % 1.0)) ** 2
+            r = 1.0 / math.sqrt(1 + (Q * (tone / fc - fc / tone)) ** 2)
+            total += w * r
+        resp.append(total)
+
+    peak = max(resp)
+    above_half = sum(1 for v in resp if v > peak / 2) / len(resp) * 100
+    steepest = max(abs(resp[i + 1] - resp[i])
+                   for i in range(len(resp) - 1)) / peak * 100
+
+    print(f"    effective Q ~ {Q:.1f}")
+    print(f"    tone audible (above half peak) for {above_half:.1f}% "
+          f"of the octave")
+    print(f"    steepest step {steepest:.2f}% of peak per 0.25% of cycle")
+
+    # Below ~50% the onset reads as a switch rather than a fade.
+    if above_half < 50.0:
+        ok = False
+        print("    TOO NARROW - bands will snap on and off rather than fade")
+    print(f"    {'the window dominates the envelope, as it should'
+             if ok else 'FAIL'}")
+    return ok
+
+
 def main():
     print("SHEPARD rising comb check")
     ok = check_tuning()
@@ -317,6 +370,7 @@ def main():
     ok &= check_selectivity()
     ok &= check_resonant_gain()
     ok &= check_retune_ringout()
+    ok &= check_sweep_envelope()
     ok &= check_centres_match_oscillators()
     ok &= check_level_across_glide()
     print("PASS" if ok else "FAIL")

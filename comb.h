@@ -41,14 +41,28 @@
 
 namespace shepard {
 
-// Resonance. Lower q is narrower and more resonant; the filter is stable while
-// q > f, so this also sets the highest usable centre frequency.
+// Resonance. In this topology the coefficient is INVERSE to Q: effective
+// Q ~ 32768/kCombQ, so a LARGER number means a WIDER band.
 //
-// 2000 (Q ~ 16) measured 16386 at the centre against ~680 an octave away -
-// about 27 dB of rejection, which is narrow enough to read as a distinct comb
-// tooth while still passing enough signal to be musical. Much narrower and the
-// output becomes a set of sine tones with the source barely audible in them.
-static constexpr int32_t kCombQ = 2000;
+// 8192 gives Q ~ 4, and the reason it is not narrower is about how the comb
+// MOVES rather than how it sounds standing still.
+//
+// The band centres sweep an octave per cycle. A narrow band therefore passes a
+// fixed partial only while its centre is within a bandwidth of it, which at
+// Q = 16 is 17% of the octave - so a sustained tone appeared abruptly, sounded
+// briefly and vanished. Reported as bands that "hard start/stop" rather than
+// fading, and the diagnosis is worth keeping: the WINDOW fades correctly
+// (0.00 -> 0.75 smoothly, verified), but at high Q the filter's own resonance
+// curve is far steeper than the window and dominates the envelope entirely.
+//
+//     Q = 16   audible 16.5% of the cycle, steep onset
+//     Q =  8   audible 35.0%
+//     Q =  4   audible 86.5%, gentle - the window is what you hear
+//
+// At Q = 4 the rejection is ~15.5 dB an octave either side rather than 27.7.
+// Broader teeth, but the motion is smooth and the fade is the window's, which
+// is what makes it read as a rising filter rather than a set of tuned blips.
+static constexpr int32_t kCombQ = 8192;
 
 // Highest centre frequency the SVF stays well-behaved at. The Chamberlin form
 // needs f = 2*sin(pi*fc/SR) < 1, i.e. fc < SR/6 = 8 kHz; 7500 keeps a margin.
@@ -82,7 +96,7 @@ class CombBank {
 
     // NORMALISE BY THE RESONANT GAIN. Without this the filter is not just
     // selective, it is LOUD: a resonant bandpass boosts an on-centre tone by
-    // roughly 32768/q, which at kCombQ = 2000 is about 16x.
+    // roughly 32768/q, which at kCombQ = 8192 is about 4x.
     //
     // That is why the first version distorted so badly on tonal input while
     // sounding fine on noise - a drone sitting on a band centre drove the

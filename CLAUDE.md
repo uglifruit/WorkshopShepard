@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — thirteen findings, three of them my own fixes making things worse
+## Found on HARDWARE — fourteen findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -423,6 +423,38 @@ dropped the input from `<< 6` to `<< 4`. That removed the clipping and left the
 card 15 dB quiet — trading a loud fault for a quiet one while the actual bug
 survived. With the rotation fixed, `<< 6` measures a worst-case peak of 1368
 against the 1450 knee. The gain was never wrong.
+
+### 14. The bands snapped on and off instead of fading — the Q was too high
+
+*"I'd expect it to fade in/out as the relative gain of the band was introduced.
+Or am I misunderstanding?"* — not misunderstanding at all, and the question was
+the right one to press on.
+
+**The window was innocent**: verified fading smoothly from 0.0000 to 0.7500
+across the sweep, exactly as designed. The culprit was the FILTER'S OWN
+RESONANCE CURVE, which at Q ≈ 16 is far steeper than the window and therefore
+dominates the envelope completely.
+
+The point that makes this specific to a comb that MOVES: a band passes a fixed
+partial only while its centre is within a bandwidth of it. Sweeping an octave
+per cycle, that works out as
+
+    Q = 16   tone audible 16.5% of the octave, steep onset
+    Q =  8   35.0%
+    Q =  4   86.5%, gentle - the window is what you hear
+
+So a sustained tone appeared abruptly, sounded briefly and vanished. `kCombQ`
+is now 8192 (Q ≈ 4; note the coefficient is INVERSE to Q, so larger is wider).
+Rejection drops from 27.7 dB an octave out to 15.5 - broader teeth, but the
+motion is smooth and the fade is the window's, which is what makes it read as a
+rising filter rather than a set of tuned blips.
+
+`comb_check.py::check_sweep_envelope` now asserts a fixed tone stays audible
+for at least half the octave, so a future "let's make it more selective" cannot
+silently bring the snapping back.
+
+Also worth noting: the internal resonator state is ~10x smaller at Q = 4, which
+gives the whole path far more headroom than it had.
 
 ### The lesson, which is the same one four times
 

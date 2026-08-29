@@ -130,7 +130,7 @@ def snap_to_scale(pos, scale):
     return below if d_below <= d_above else above
 
 
-COMB_Q = 2000
+COMB_Q = 8192
 COMB_MAX_INC = 671088640
 
 

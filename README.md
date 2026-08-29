@@ -121,10 +121,17 @@ Feed it something with broadband content — noise, a pad, cymbals, a full mix.
 The comb needs energy across the spectrum to have something to find. A single
 sine will simply come and go as a band sweeps past it.
 
-The band outputs are normalised by their own resonant gain, so a tone landing
-on a band centre passes at unity rather than being boosted ~16× — without that
-the path clipped hard on anything tonal. Make-up gain is calibrated against a
-sustained drone, the worst case, not against noise.
+The bands are deliberately **broad** (Q ≈ 4). A narrower comb sounds more
+dramatic standing still, but this one *moves* — and a narrow band passes a
+fixed partial only while its centre is within a bandwidth of it, so at high Q a
+sustained note appears abruptly, sounds briefly and vanishes. At Q ≈ 4 a tone
+stays audible for most of the octave and the envelope you hear is the window's
+own fade, which is what makes it read as a rising filter rather than a set of
+tuned blips.
+
+Band outputs are normalised by their own resonant gain, so a partial landing on
+a centre passes at unity rather than being boosted — without that the path
+clipped hard on anything tonal.
 
 **This replaced a Hilbert frequency shifter**, which was the original design.
 A shifter moves every partial by the same number of *hertz* rather than the
