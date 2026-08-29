@@ -79,7 +79,22 @@ class CombBank {
     lp_[i] += MulQ20(f, bp_[i]);
     const int32_t hp = x - lp_[i] - MulQ15(kCombQ, bp_[i]);
     bp_[i] += MulQ20(f, hp);
-    return bp_[i];
+
+    // NORMALISE BY THE RESONANT GAIN. Without this the filter is not just
+    // selective, it is LOUD: a resonant bandpass boosts an on-centre tone by
+    // roughly 32768/q, which at kCombQ = 2000 is about 16x.
+    //
+    // That is why the first version distorted so badly on tonal input while
+    // sounding fine on noise - a drone sitting on a band centre drove the
+    // accumulator to a peak of 7939 against a 2047 rail, with 48% of samples
+    // clipping. Noise never lands on a centre long enough to ring, which is
+    // exactly why calibrating the make-up gain on noise was the wrong choice.
+    //
+    // Multiplying by kCombQ undoes that boost, so an on-centre tone passes at
+    // UNITY and off-centre content is attenuated - which is what a filter
+    // should do. Selectivity is untouched: it is set by q, and this scales the
+    // whole response, so the 27.7 dB rejection is unchanged.
+    return MulQ15(kCombQ, bp_[i]);
   }
 
   // Tuning coefficient for a centre frequency given as a Q32 phase increment

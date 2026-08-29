@@ -68,7 +68,7 @@ def run_band(f, in_hz, n=12000, amp=1000):
         lp += mul_q20(f, bp)
         hp = x - lp - mul_q15(COMB_Q, bp)
         bp += mul_q20(f, hp)
-        out.append(bp)
+        out.append(mul_q15(COMB_Q, bp))
     return out
 
 
@@ -216,11 +216,44 @@ def check_level_across_glide():
     return ok
 
 
+def check_resonant_gain():
+    """An on-centre tone must pass at roughly UNITY, not be boosted.
+
+    THE BUG THIS EXISTS FOR. A resonant bandpass boosts a tone sitting on its
+    centre by roughly 32768/q - about 16x at kCombQ = 2000. Unnormalised, a
+    sustained drone drove the output accumulator to a peak of 7939 against a
+    2047 rail with 48% of samples clipping, and the card sounded "very very
+    distorted".
+
+    Noise never lands on a centre long enough to ring, so it stays tame - which
+    is exactly why calibrating the gain staging on noise was the wrong choice
+    and hid the fault. This checks the WORST case: a steady tone right on a
+    band centre.
+    """
+    print("  on-centre gain (normalised by the resonant gain):")
+    ok = True
+    for fc in (110.0, 440.0, 1760.0):
+        f = tune_from_inc(int(fc / SR * (1 << 32)))
+        amp = 1000
+        out = run_band(f, fc, amp=amp)
+        peak = max(abs(v) for v in out[6000:])
+        gain = peak / amp
+        status = "ok" if 0.5 < gain < 2.0 else "FAIL"
+        if not (0.5 < gain < 2.0):
+            ok = False
+        print(f"    {fc:7.1f} Hz: input {amp} -> peak {peak:6d}  "
+              f"gain x{gain:.2f}  {status}")
+    print(f"    {'unity-ish, so a tone cannot blow up the accumulator'
+             if ok else 'RESONANT BOOST - this WILL clip on tonal input'}")
+    return ok
+
+
 def main():
     print("SHEPARD rising comb check")
     ok = check_tuning()
     ok &= check_stability()
     ok &= check_selectivity()
+    ok &= check_resonant_gain()
     ok &= check_centres_match_oscillators()
     ok &= check_level_across_glide()
     print("PASS" if ok else "FAIL")

@@ -121,8 +121,10 @@ Feed it something with broadband content — noise, a pad, cymbals, a full mix.
 The comb needs energy across the spectrum to have something to find. A single
 sine will simply come and go as a band sweeps past it.
 
-A resonant band passes only a fraction of a broadband input, so the path has
-measured make-up gain: it sits within 1 dB of the internal voice.
+The band outputs are normalised by their own resonant gain, so a tone landing
+on a band centre passes at unity rather than being boosted ~16× — without that
+the path clipped hard on anything tonal. Make-up gain is calibrated against a
+sustained drone, the worst case, not against noise.
 
 **This replaced a Hilbert frequency shifter**, which was the original design.
 A shifter moves every partial by the same number of *hertz* rather than the

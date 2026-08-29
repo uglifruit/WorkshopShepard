@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — eleven findings, two of them my own fixes making things worse
+## Found on HARDWARE — twelve findings, three of them my own fixes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -362,6 +362,33 @@ Three things it needed:
    broadband input, so at the shifter's old input scaling the comb sat 13 dB
    below the synth voice and Y read as a fade. `<< 5` puts it within 1 dB,
    with 3.1 dB of headroom on noise.
+
+### 12. The comb clipped hard on tonal input — and noise hid it
+
+"The audio path feels very very distorted (clipped?)". It was, badly:
+**peak 7939 against a 2047 rail, 48% of samples clipping** on a sustained
+drone. Measured, not guessed.
+
+A resonant bandpass boosts a tone sitting on its centre by roughly `32768/q` —
+about **16×** at `kCombQ = 2000`. The filter was not merely selective, it was
+loud.
+
+**And I calibrated the make-up gain on noise**, which is precisely the source
+that cannot expose this: noise never sits on a band centre long enough to ring,
+so it stayed tame at a setting where a drone was 4× over the rail. Choosing the
+flattering test signal is the whole mistake.
+
+Fixed by normalising the band output by its own resonant gain
+(`MulQ15(kCombQ, bp)`), so an on-centre tone passes at **unity** and off-centre
+content is attenuated — what a filter should do. Selectivity is untouched,
+since it is set by q and this scales the whole response: 27.7 dB rejection
+before and after.
+
+Make-up gain then recalibrated against the WORST case rather than the average:
+`<< 6`, with zero clipping on noise, drone and chord, at every Y position.
+
+`comb_check.py::check_resonant_gain` now asserts on-centre gain stays near
+unity, using a steady tone on a band centre — the case that actually bites.
 
 ### The lesson, which is the same one four times
 

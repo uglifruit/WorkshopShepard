@@ -168,7 +168,9 @@ class CombBank:
         self.lp[i] += mul_q20(f, self.bp[i])
         hp = x - self.lp[i] - mul_q15(COMB_Q, self.bp[i])
         self.bp[i] += mul_q20(f, hp)
-        return self.bp[i]
+        # Normalise by the resonant gain (~32768/q), so an on-centre tone
+        # passes at unity instead of being boosted ~16x.
+        return mul_q15(COMB_Q, self.bp[i])
 
 
 
@@ -268,7 +270,7 @@ class Engine:
             if (k & 31) == 0:
                 self.update_control()
 
-            comb_in = (audio_in[k] << 5) if audio_in else 0
+            comb_in = (audio_in[k] << 6) if audio_in else 0
 
             acc_l = 0
             acc_r = 0
