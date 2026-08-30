@@ -224,6 +224,7 @@ class Engine:
 
         n = self.layers
         od = (0xFFFFFFFF // n) + 1
+        wd = ((self.width << 17) // n) & 0xFFFFFFFF
         md = self.master_out // n
 
         # The octave wrap RELABELS which layer holds which gain: after the
@@ -257,16 +258,10 @@ class Engine:
             r = m >> 14
             r = (r << centre) if centre >= 0 else (r >> (-centre))
             self.oct_rate[i] = max(1024, min(OCT_MAX_RATE, r))
-            u = (md + i * od) & 0xFFFFFFFF
-            w = hann_q15(u)
-            # Alternate-layer panning - see the note in UpdateControl.
-            lean = 32767 - self.width
-            if i & 1:
-                self.win_l[i] = mul_q15(w, lean)
-                self.win_r[i] = w
-            else:
-                self.win_l[i] = w
-                self.win_r[i] = mul_q15(w, lean)
+            u_l = (md + i * od) & 0xFFFFFFFF
+            u_r = (u_l + wd) & 0xFFFFFFFF
+            self.win_l[i] = hann_q15(u_l)
+            self.win_r[i] = hann_q15(u_r)
 
     def render(self, n_samples, audio_in=None):
         """Returns (left, right) lists of int16-range samples."""

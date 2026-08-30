@@ -86,7 +86,7 @@ def render(n_layers, master, osc, width=0):
 
     md = master // n_layers
     od = (0xFFFFFFFF // n_layers) + 1
-    lean = 32767 - width
+    wd = ((width << 17) // n_layers) & 0xFFFFFFFF
 
     acc_l = 0
     acc_r = 0
@@ -95,17 +95,10 @@ def render(n_layers, master, osc, width=0):
         osc[i] = (osc[i] + inc) & 0xFFFFFFFF
         v = sin_q15(osc[i])
 
-        # Alternate-layer panning: even left, odd right, by the width
-        # amount. This replaced offsetting the window between channels,
-        # which reached only 0.90 correlation at maximum.
-        u = (md + i * od) & 0xFFFFFFFF
-        w = mul_q15(v, hann_q15(u))
-        if i & 1:
-            acc_l += mul_q15(w, lean)
-            acc_r += w
-        else:
-            acc_l += w
-            acc_r += mul_q15(w, lean)
+        u_l = (md + i * od) & 0xFFFFFFFF
+        u_r = (u_l + wd) & 0xFFFFFFFF
+        acc_l += mul_q15(v, hann_q15(u_l))
+        acc_r += mul_q15(v, hann_q15(u_r))
 
     g = INV_SQRT_N[n_layers]
     return mul_q15(acc_l, g) >> 5, mul_q15(acc_r, g) >> 5
@@ -211,10 +204,9 @@ def check_no_clipping_at_extremes():
 def check_stereo_sums_to_mono():
     """L+R must never null.
 
-    Width pans whole LAYERS apart rather than offsetting phase, so the two
-    channels carry different components and a sum cannot cancel. The loss at
-    full width is the honest halving of two decorrelated signals - about
-    3 dB - not cancellation, which is why the threshold below allows it.
+    Stereo width offsets the WINDOW, not the oscillator phase, specifically so
+    that a mono sum stays valid. If width were applied to phase this test
+    would show cancellation.
     """
     print("  mono compatibility across stereo width:")
     ok = True
@@ -236,8 +228,8 @@ def check_stereo_sums_to_mono():
         rms_mid = math.sqrt(sq_mid / count)
         rms_l = math.sqrt(sq_l / count)
         loss = 20 * math.log10(rms_mid / rms_l) if rms_l else -99
-        status = "ok" if loss > -4.0 else "CANCELS"
-        if loss <= -4.0:
+        status = "ok" if loss > -3.0 else "CANCELS"
+        if loss <= -3.0:
             ok = False
         print(f"    width {width_pct:3d}%: mono sum {loss:+.2f} dB "
               f"vs left alone  {status}")

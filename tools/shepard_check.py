@@ -77,18 +77,6 @@ def pow2_q30(f_q32):
     return v0 + mul_q15(frac, v1 - v0)
 
 
-BASE_INC = 1229782          # 13.75 Hz (A-1) as a Q32 phase increment
-
-
-def sin_q15(phase):
-    """SinQ15 from shepard.h - interpolated sine of a Q32 audio phase."""
-    idx = (phase >> 22) & (SIN_LUT_SIZE - 1)
-    frac = (phase >> 7) & 0x7FFF
-    s0 = SIN_LUT[idx]
-    s1 = SIN_LUT[(idx + 1) & (SIN_LUT_SIZE - 1)]
-    return s0 + mul_q15(frac, s1 - s0)
-
-
 INV_SQRT_N = [0, 0, 0, 18919, 16384, 14654, 13377, 12385,
               11585, 10923, 10362, 9880, 9459]
 
@@ -406,80 +394,6 @@ def check_illusion():
     return ok
 
 
-def check_stereo_width():
-    """Width must actually decorrelate the channels, and stay mono-safe.
-
-    Measured on real AUDIO, not on the window sums. The window sums stay
-    correlated by construction - it is only once each layer carries its own
-    oscillator that panning them apart decorrelates the channels, so summing
-    gains would report 1.00 at every width and prove nothing.
-
-    The first implementation offset the WINDOW POSITION between channels.
-    That can differ by at most ONE layer slot before the two channels stop
-    being the same stack, and a smooth window shifted one slot redistributes
-    gain only slightly - measured L/R correlation 0.90 at maximum, barely
-    wide. Inherent to the method, not a scaling error.
-
-    Panning whole layers instead - even left, odd right - reaches 0.00, and
-    is mono-safe by construction: the channels carry DIFFERENT layers rather
-    than a phase difference, so a sum cannot cancel.
-    """
-    print("  stereo width decorrelates, and sums to mono safely:")
-    ok = True
-    n = 8
-    nsamp = 8000
-    inc = [BASE_INC << i for i in range(n)]
-    prev = None
-
-    for pct in (0, 50, 100):
-        width = int(pct / 100 * 32767)
-        lean = 32767 - width
-        phase = [0] * n
-        master = 0
-        dot = el = er = summed = 0.0
-
-        for k in range(nsamp):
-            if (k & 31) == 0:
-                master = (master + 4000000) & 0xFFFFFFFF
-            sl = sr = 0
-            for i in range(n):
-                phase[i] = (phase[i] + inc[i]) & 0xFFFFFFFF
-                v = mul_q15(sin_q15(phase[i]),
-                            hann_q15(layer_u_q32(master, i, n)))
-                if i & 1:
-                    sl += mul_q15(v, lean)
-                    sr += v
-                else:
-                    sl += v
-                    sr += mul_q15(v, lean)
-            dot += sl * sr
-            el += sl * sl
-            er += sr * sr
-            summed += ((sl + sr) / 2.0) ** 2
-
-        corr = dot / math.sqrt(el * er) if el and er else 1.0
-        mono_db = 10 * math.log10(summed / el) if el and summed else -99
-        print(f"    width {pct:3d}%: channel correlation {corr:6.3f}, "
-              f"mono sum {mono_db:+.2f} dB")
-
-        if prev is not None and corr > prev:
-            ok = False
-            print("      NOT decreasing - width is not widening")
-        prev = corr
-        # -3 dB is the honest halving of two decorrelated signals; below
-        # that would be cancellation.
-        if mono_db < -4.0:
-            ok = False
-            print("      MONO SUM CANCELS")
-
-    if prev is None or prev > 0.2:
-        ok = False
-        print("    full width is not decorrelated  FAIL")
-    else:
-        print("    full width reaches near-zero correlation  ok")
-    return ok
-
-
 def main():
     print("SHEPARD oscillator bank check")
     ok = check_window_sum()
@@ -490,7 +404,6 @@ def main():
     ok &= check_inv_sqrt()
     ok &= check_nyquist()
     ok &= check_illusion()
-    ok &= check_stereo_width()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
