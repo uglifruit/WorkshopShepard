@@ -27,7 +27,7 @@ deliberately left alone**, and the reason matters if you are tempted to
 So: **product names in `README.md`, `info.yaml` and `docs/`; mechanism names in
 the source.** The repository is still `WorkshopShepard` and that is fine.
 
-## Current status: v0.2.0, approaching release
+## Current status: v1.0.0, RELEASED
 
 `build/shepard.uf2` — **1.38% flash, 56.83% RAM**. All six host test suites
 pass.
@@ -1280,9 +1280,18 @@ removed once it had served its purpose.
   energy up high where the octave stack has rolled off — and the fix would be
   a gentle tilt on the live path, not more gain.
 
-**Release chores:**
+**Released as v1.0.0 on 2026-08-30**, `draft: false` / `Status: Released`,
+with `UF2/shepard.uf2` populated and a PR opened against
+`TomWhitwell/Workshop_Computer` as `releases/104_barbers_pole`.
 
-- `panels/` is empty — no panel art yet.
-- `UF2/` is empty — populate on first release, and flip `info.yaml` to
-  `draft: false` / `Status: Released` once the above is confirmed.
-- `docs/BRINGUP.md` wants a pass to drop the CV Out 2 steps.
+Note the upstream schema differs from what this repo carried while drafting:
+**`short-description` is REQUIRED and `Description` is not an alias for it**, so
+a card that validates locally can still fail the PR check. `date` is a valid
+alias for `date-created`. Both were corrected at release.
+
+**Still open:**
+
+- `panels/` is empty - no panel art yet.
+- The level work of this session (findings 24-26) and the HOLD move (finding
+  27) are unheard on hardware. Everything measures correctly on the host, but
+  this card's whole history says that is not the same thing.

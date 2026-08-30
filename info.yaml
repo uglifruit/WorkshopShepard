@@ -1,24 +1,23 @@
-draft: true
+draft: false
 Name: Barber's Pole
-Description: "DRAFT (on hardware, still being shaken out): an infinite glissando — Shepard-Risset tones that rise or fall forever, as sine tones or by octave-stacking live audio"
+short-description: "An infinite glissando — Shepard-Risset tones that rise or fall forever, as sine tones or by octave-stacking live audio"
 Language: C++ (ComputerCard)
 Creator: Andy Jenkinson (uglifruit)
-Version: "0.1.0"
-Status: Draft
+Version: "1.0.0"
+Status: Released
 License: MIT
 repository: https://github.com/uglifruit/WorkshopShepard
 Editor: none
-date: 2026-08-28
-
-# ON HARDWARE, NOT FINISHED. Several listening sessions have found and fixed
-# real bugs, but the most recent fixes have not themselves been heard. Flip
-# draft/Status and populate UF2/ only once it has settled.
+date-created: 2026-08-28
+date-updated: 2026-08-30
 
 contact:
   social:
     github: https://github.com/uglifruit
 
-uf2: []
+uf2:
+  - path: UF2/shepard.uf2
+    name: Barber's Pole 1.0.0
 
 tags:
   - effect
@@ -32,12 +31,6 @@ tags:
   - percussion
 
 summary: |
-  <b>DRAFT - ON HARDWARE, STILL BEING SHAKEN OUT.</b> The card has been flashed
-  and played, and several rounds of listening have found and fixed real bugs.
-  It is not finished: the most recent fixes have not themselves been heard, and
-  there is no released binary. Treat the details below as current intent rather
-  than as settled fact.<br><br>
-
   BARBER'S POLE generates Shepard-Risset tones: the auditory illusion of a pitch that
   glides forever upward or downward without ever leaving its range. Octave-spaced
   components slide together through a fixed spectral envelope, each fading in at

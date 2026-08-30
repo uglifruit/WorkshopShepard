@@ -193,7 +193,26 @@ always the ones sounding.
 
 Even LEDs (0/2/4) indicate a normal boot, odd LEDs (1/3/5) the alt-boot.
 
+## Flashing
+
+Hold BOOTSEL while connecting the Pico, then drag `UF2/shepard.uf2` onto the
+drive that appears. It reboots on its own.
+
+To build from source you need the Pico SDK:
+
+```
+cmake -G Ninja -B build -S .
+ninja -C build
+```
+
+`FLASHME/shepard.uf2` is refreshed by every build, so it always matches the
+source you just compiled; `UF2/` holds the released binary.
+
 ## Credits
+
+Built on Chris Johnson's header-only
+[ComputerCard](https://github.com/TomWhitwell/Workshop_Computer) library for
+the Music Thing Modular Workshop System.
 
 The name is the visual illusion the sound is usually compared to. The tone
 itself is Roger Shepard's (1964); the continuous glissando form is
