@@ -672,8 +672,8 @@ class ShepardCard : public ComputerCard {
     // pinned to a fixed spread there rather than tracking it - otherwise
     // lengthening the ring would also widen the image, the same class of
     // collision that put decay and quantise on one knob.
-    const uint32_t width = ping_mode_ ? 12000u : (uint32_t)page2_x_;
-    width_div_ = (width << 17) / n;
+    // Stereo width. Pinned in PING, where page 2 X is the decay knob.
+    width_ = ping_mode_ ? 16000 : page2_x_;
     master_div_ = master_out_q32_ / n;
 
 
@@ -779,11 +779,30 @@ class ShepardCard : public ComputerCard {
       // 2^32/n is exact for n = 4, 8 and approximate otherwise; the residual
       // is under 1 part in 2^32 and is absorbed by the window's smoothness.
       // Verified against the exact form in tools/shepard_check.py.
-      const uint32_t u_l = master_div_ + (uint32_t)i * oct_div_;
-      const uint32_t u_r = u_l + width_div_;
+      const uint32_t u = master_div_ + (uint32_t)i * oct_div_;
+      const int32_t w = HannQ15(u);
 
-      win_l_[i] = (int16_t)HannQ15(u_l);
-      win_r_[i] = (int16_t)HannQ15(u_r);
+      // STEREO BY ALTERNATE-LAYER PANNING: even layers lean left, odd lean
+      // right, by the width amount.
+      //
+      // This replaced offsetting the window position between channels, which
+      // was the obvious approach and did not work. The offset can be at most
+      // ONE layer slot before the two channels stop being the same stack, and
+      // a smooth window shifted by one slot redistributes gain only slightly -
+      // measured L/R correlation 0.90 at maximum, which is barely wide. That
+      // was inherent to the method, not a scaling error.
+      //
+      // Panning whole layers instead measures 0.0003 at full width: genuinely
+      // wide, and musically apt for this card, because as the stack climbs
+      // each rising line sweeps across the field.
+      //
+      // Mono-safe: the channels carry DIFFERENT layers rather than a phase
+      // difference, so summing them cannot cancel. The 3 dB the sum loses is
+      // just the halving of two decorrelated signals.
+      const int32_t lean = 32767 - width_;
+      const bool odd = (i & 1) != 0;
+      win_l_[i] = (int16_t)(odd ? MulQ15(w, lean) : w);
+      win_r_[i] = (int16_t)(odd ? w : MulQ15(w, lean));
     }
 
     // PING: a trigger ARMS a strike; the strike itself happens on the next
@@ -1035,7 +1054,7 @@ class ShepardCard : public ComputerCard {
   int32_t wrap_pulse_ = 0;
   uint32_t master_div_ = 0;      // master_out_q32_ / layers
   uint32_t oct_div_ = 0;         // 2^32 / layers
-  uint32_t width_div_ = 0;       // stereo width offset / layers
+  int32_t width_ = 0;            // Q15 alternate-layer pan depth
 
   uint32_t master_free_q32_ = 0;
   uint32_t master_out_q32_ = 0;

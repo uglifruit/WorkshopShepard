@@ -149,9 +149,11 @@ panel:
       name: Right
       type: audio
       description: >
-        Right channel. Width decorrelates the two by offsetting the window
-        rather than the oscillator phase, so a mono sum stays valid and never
-        cancels.
+        Right channel. At zero width both outputs are identical; turning
+        width up pans alternate octave layers apart, so the rising line
+        sweeps across the field as it climbs. Mono-safe - the channels carry
+        different layers rather than a phase difference, so a sum cannot
+        cancel.
     - id: CVOut1
       name: Phase
       type: cv
@@ -206,8 +208,9 @@ controls:
       x:
         name: WIDTH
         description: >
-          Stereo width, by offsetting the window position between channels.
-          Mono-safe at every setting.
+          Stereo width, by panning alternate octave layers apart. Fully
+          anticlockwise both outputs are identical; fully clockwise the
+          channels are completely decorrelated. Mono-safe at every setting.
       y:
         name: LEVEL
         description: >
