@@ -209,10 +209,14 @@ controls:
         description: >
           Smooth glissando, or one of four scales that repeat every octave:
           chromatic (0 1 2 3 4 5 6 7 8 9 10 11), major (0 2 4 5 7 9 11), minor
-          (0 2 3 5 7 8 10) or pentatonic (0 2 4 7 9). In a rising glide the
-          chromatic setting is nearly indistinguishable from smooth, so the
-          modal ones are what change the character. Steps are slewed over
-          about 1.4ms rather than snapped.
+          (0 2 3 5 7 8 10), pentatonic (0 2 4 7 9), diminished
+          (0 2 3 5 6 8 9 11) or whole tone (0 2 4 6 8 10). In a rising glide
+          the chromatic setting is nearly indistinguishable from smooth, so
+          the modal ones are what change the character; the last two are
+          symmetric and repeat BELOW the octave, which suits a barber-pole
+          unusually well. Steps are even in time - the pole advances one
+          degree per unit time rather than a fixed pitch interval - and are
+          slewed over about 1.4ms rather than snapped.
       x:
         name: WIDTH
         description: >

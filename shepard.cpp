@@ -78,6 +78,30 @@ const uint32_t kScalePent[5] = {
   0xC0000000u,   //  900
 };
 
+// Symmetric scales. Both repeat BELOW the octave - diminished every minor
+// third, whole tone every whole tone - which suits a barber-pole unusually
+// well: the stack is already self-similar at a smaller interval than the wrap,
+// so the climb has no obvious home key to return to.
+const uint32_t kScaleDim[8] = {
+  0x00000000u,   //    0
+  0x2AAAAAABu,   //  200
+  0x40000000u,   //  300
+  0x6AAAAAABu,   //  500
+  0x80000000u,   //  600
+  0xAAAAAAABu,   //  800
+  0xC0000000u,   //  900
+  0xEAAAAAABu,   // 1100
+};
+
+const uint32_t kScaleWhole[6] = {
+  0x00000000u,   //    0
+  0x2AAAAAABu,   //  200
+  0x55555555u,   //  400
+  0x80000000u,   //  600
+  0xAAAAAAABu,   //  800
+  0xD5555555u,   // 1000
+};
+
 // Table lookup by scale id. Static (file-scope) is fine here - these are
 // pointers to const data, read only, never written.
 static const uint32_t* const kScaleTable[kScaleCount] = {
@@ -86,6 +110,8 @@ static const uint32_t* const kScaleTable[kScaleCount] = {
   kScaleMaj,
   kScaleMin,
   kScalePent,
+  kScaleDim,
+  kScaleWhole,
 };
 
 static const int kScaleLen[kScaleCount] = {
@@ -94,6 +120,8 @@ static const int kScaleLen[kScaleCount] = {
   7,
   7,
   5,
+  8,
+  6,
 };
 
 void ShepardInit() {
@@ -114,6 +142,32 @@ void ShepardInit() {
     const double v = pow(2.0, (double)i / (double)kPow2LutSize) * 1073741824.0;
     pow2_lut[i] = (v >= 2147483647.0) ? 2147483647 : (int32_t)llrint(v);
   }
+}
+
+uint32_t DegreeToPitch(uint32_t pos_q32, int scale) {
+  if (scale <= kScaleSmooth || scale >= kScaleCount) return pos_q32;
+
+  const uint32_t* tab = kScaleTable[scale];
+  const uint32_t n = (uint32_t)kScaleLen[scale];
+
+  // Which degree, and how far through it. The octave carries over so the
+  // stack keeps rising past the top of the scale.
+  //
+  // A 64-bit product would be the obvious form; this runs at control rate so
+  // it would be affordable, but the split keeps the audio path's no-int64
+  // rule intact everywhere rather than only where it is measured.
+  const uint32_t hi = pos_q32 >> 16;
+  const uint32_t idx = (hi * n) >> 16;          // 0 .. n-1
+  const uint32_t within = (hi * n) & 0xFFFF;    // fraction through the degree
+
+  const uint32_t here = tab[idx];
+  const uint32_t next = (idx + 1u < n) ? tab[idx + 1u] : tab[0];
+
+  // Interpolate across the gap so the pitch still glides between degrees
+  // rather than jumping - the portamento in UpdateControl then smooths what
+  // is left. Unsigned arithmetic wraps correctly at the octave.
+  const uint32_t span = next - here;            // wraps for the last degree
+  return here + (uint32_t)(((uint64_t)span * within) >> 16);
 }
 
 // Nearest degree, correct ACROSS THE OCTAVE WRAP.

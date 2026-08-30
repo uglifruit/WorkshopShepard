@@ -91,11 +91,24 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 | **Major** | 0 2 4 5 7 9 11 |
 | **Minor** | 0 2 3 5 7 8 10 |
 | **Pentatonic** | 0 2 4 7 9 |
+| **Diminished** | 0 2 3 5 6 8 9 11 |
+| **Whole tone** | 0 2 4 6 8 10 |
 
 The scale repeats every octave, so the glide walks the same degrees forever.
 In a *rising* glide the chromatic setting is nearly indistinguishable from
 smooth — every semitone is present either way — so the modal settings are what
 actually change the character.
+
+The last two are **symmetric**, and suit a barber-pole unusually well: they
+repeat *below* the octave — diminished every minor third, whole tone every
+whole tone — so the stack is already self-similar at a smaller interval than
+the wrap, and the climb has no home key to return to.
+
+**Steps are even in time.** The pole advances one degree per unit time rather
+than a fixed pitch interval, so every note holds equally long whatever its gap
+— without it a whole tone would take twice as long to cross as a semitone, and
+in major the notes either side of E–F and B–C would pass twice as quickly as
+the rest.
 
 ### Switch DOWN — momentary
 

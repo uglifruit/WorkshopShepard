@@ -186,6 +186,8 @@ extern const uint32_t kScale12[];    // [12] chromatic, 12-ET
 extern const uint32_t kScaleMaj[];   // [7]  major
 extern const uint32_t kScaleMin[];   // [7]  natural minor
 extern const uint32_t kScalePent[];  // [5]  major pentatonic
+extern const uint32_t kScaleDim[];   // [8]  diminished / octatonic
+extern const uint32_t kScaleWhole[]; // [6]  whole tone
 
 enum Scale {
   kScaleSmooth = 0,   // no quantisation - continuous glissando
@@ -193,8 +195,28 @@ enum Scale {
   kScaleMajor = 2,
   kScaleMinor = 3,
   kScalePentatonic = 4,
-  kScaleCount = 5
+  kScaleDiminished = 5,
+  kScaleWholeTone = 6,
+  kScaleCount = 7
 };
+
+// Map a DEGREE-SPACE position to the pitch of that degree.
+//
+// pos_q32 spans the scale evenly: 0 is degree 0, 2^32/n is degree 1, and so
+// on regardless of how far apart the degrees actually are in pitch. The
+// return is the Q32 octave position of the degree the position falls in.
+//
+// This is what makes stepped modes even IN TIME. Advancing the free phase at
+// a constant rate through degree space holds every note for the same
+// duration; advancing it through PITCH space instead holds a whole tone twice
+// as long as a semitone, so in major the notes either side of E-F and B-C
+// pass twice as quickly as the rest.
+//
+// The window and the layer increments are untouched by this - they consume
+// the resulting PITCH position and never see how it was arrived at, so the
+// constant-sum invariant is exactly as before (verified: 0.0000% ripple
+// either way).
+uint32_t DegreeToPitch(uint32_t pos_q32, int scale);
 
 // Snap a Q32 octave position to the nearest degree of a scale.
 //

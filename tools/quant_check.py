@@ -26,7 +26,8 @@ import sys
 
 OCT = 1 << 32
 
-SCALE_SMOOTH, SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT = 0, 1, 2, 3, 4
+(SCALE_SMOOTH, SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT,
+ SCALE_DIM, SCALE_WHOLE) = 0, 1, 2, 3, 4, 5, 6
 
 SCALE12 = [0x00000000, 0x15555555, 0x2AAAAAAB, 0x40000000,
            0x55555555, 0x6AAAAAAB, 0x80000000, 0x95555555,
@@ -40,17 +41,27 @@ SCALE_MIN_T = [0x00000000, 0x2AAAAAAB, 0x40000000, 0x6AAAAAAB,
 
 SCALE_PENT_T = [0x00000000, 0x2AAAAAAB, 0x55555555, 0x95555555, 0xC0000000]
 
+SCALE_DIM_T = [0x00000000, 0x2AAAAAAB, 0x40000000, 0x6AAAAAAB,
+               0x80000000, 0xAAAAAAAB, 0xC0000000, 0xEAAAAAAB]
+
+SCALE_WHOLE_T = [0x00000000, 0x2AAAAAAB, 0x55555555,
+                 0x80000000, 0xAAAAAAAB, 0xD5555555]
+
 TABLES = {SCALE_CHROMATIC: SCALE12, SCALE_MAJOR: SCALE_MAJ,
-          SCALE_MINOR: SCALE_MIN_T, SCALE_PENT: SCALE_PENT_T}
+          SCALE_MINOR: SCALE_MIN_T, SCALE_PENT: SCALE_PENT_T,
+          SCALE_DIM: SCALE_DIM_T, SCALE_WHOLE: SCALE_WHOLE_T}
 
 NAMES = {SCALE_CHROMATIC: "12-ET", SCALE_MAJOR: "major",
-         SCALE_MINOR: "minor", SCALE_PENT: "pentatonic"}
+         SCALE_MINOR: "minor", SCALE_PENT: "pentatonic",
+         SCALE_DIM: "diminished", SCALE_WHOLE: "whole tone"}
 
 EXPECT_CENTS = {
     SCALE_CHROMATIC: [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100],
     SCALE_MAJOR: [0, 200, 400, 500, 700, 900, 1100],
     SCALE_MINOR: [0, 200, 300, 500, 700, 800, 1000],
     SCALE_PENT: [0, 200, 400, 700, 900],
+    SCALE_DIM: [0, 200, 300, 500, 600, 800, 900, 1100],
+    SCALE_WHOLE: [0, 200, 400, 600, 800, 1000],
 }
 
 
@@ -127,7 +138,8 @@ def check_wrap():
     """
     print("  nearest degree across the octave wrap:")
     ok = True
-    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT):
+    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT,
+                  SCALE_DIM, SCALE_WHOLE):
         tab = TABLES[scale]
         bad = 0
         worst_err = 0.0
@@ -199,7 +211,8 @@ def check_stepping():
     """Manual stepping must be monotonic and must never skip a degree."""
     print("  Pulse In 1 manual stepping:")
     ok = True
-    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT):
+    for scale in (SCALE_CHROMATIC, SCALE_MAJOR, SCALE_MINOR, SCALE_PENT,
+                  SCALE_DIM, SCALE_WHOLE):
         tab = TABLES[scale]
         n = len(tab)
 
@@ -481,6 +494,69 @@ def check_smooth_passthrough():
     return bad == 0
 
 
+def check_even_time_steps():
+    """Stepped modes must hold each degree for the SAME length of time.
+
+    THE PROPERTY THIS EXISTS FOR. The pole used to advance at a constant PITCH
+    rate, so the time spent crossing a gap was proportional to its size - a
+    whole tone took twice as long as a semitone, and in major the notes either
+    side of E-F and B-C passed twice as quickly as the rest. Reported as steps
+    that are not even in time.
+
+    DegreeToPitch makes the free phase run through DEGREE space instead, so
+    every degree holds equally long whatever its pitch gap. The window and the
+    layer increments consume the resulting PITCH and never see the difference,
+    so the constant-sum invariant is untouched.
+    """
+    print("  stepped modes hold each degree for equal time:")
+    ok = True
+
+    def degree_to_pitch(pos, tab):
+        n = len(tab)
+        hi = pos >> 16
+        idx = (hi * n) >> 16
+        within = (hi * n) & 0xFFFF
+        here = tab[idx]
+        nxt = tab[idx + 1] if idx + 1 < n else tab[0]
+        span = (nxt - here) & 0xFFFFFFFF
+        return (here + ((span * within) >> 16)) & 0xFFFFFFFF
+
+    for scale in (SCALE_MAJOR, SCALE_MINOR, SCALE_PENT, SCALE_DIM,
+                  SCALE_WHOLE):
+        tab = TABLES[scale]
+        n = len(tab)
+        # Sweep degree space evenly and record when the degree changes.
+        changes = []
+        prev = None
+        steps = 2000
+        for k in range(steps):
+            pos = (k * OCT // steps) & 0xFFFFFFFF
+            p = degree_to_pitch(pos, tab)
+            d = 0
+            for i, v in enumerate(tab):
+                if v <= p:
+                    d = i
+            if d != prev:
+                changes.append(k / steps)
+                prev = d
+
+        # Gaps between consecutive degree changes must all be 1/n.
+        if len(changes) < 2:
+            ok = False
+            print(f"    {NAMES[scale]:11s} no degree changes  FAIL")
+            continue
+        gaps = [changes[i + 1] - changes[i] for i in range(len(changes) - 1)]
+        lo, hi = min(gaps), max(gaps)
+        spread = (hi - lo) / (sum(gaps) / len(gaps)) * 100
+        status = "ok" if spread < 5.0 else "UNEVEN"
+        if spread >= 5.0:
+            ok = False
+        print(f"    {NAMES[scale]:11s} {len(gaps)} steps, "
+              f"gap spread {spread:5.2f}%  {status}")
+
+    return ok
+
+
 def main():
     print("SHEPARD quantisation check")
     ok = check_tables()
@@ -488,6 +564,7 @@ def main():
     ok &= check_slew()
     ok &= check_stepping()
     ok &= check_smooth_passthrough()
+    ok &= check_even_time_steps()
     ok &= check_rate_curve()
     ok &= check_master_advance()
     ok &= check_spiral_shift()

@@ -600,7 +600,20 @@ class ShepardCard : public ComputerCard {
     if (scale_ == kScaleSmooth) {
       master_out_q32_ = master_free_q32_;
     } else {
-      const uint32_t target = SnapToScale(master_free_q32_, scale_);
+      // STEPPED MODES ADVANCE IN DEGREE SPACE, NOT PITCH SPACE.
+      //
+      // The free phase runs at a constant rate through the SCALE - one degree
+      // per unit time - and DegreeToPitch maps that to where the degree
+      // actually sits. Without it the pole moves at constant PITCH rate, so a
+      // whole-tone gap takes twice as long to cross as a semitone and the
+      // notes either side of E-F and B-C in major pass twice as quickly as
+      // the rest. Heard as steps that are not even in time.
+      //
+      // The window and the layer increments consume the resulting PITCH and
+      // never see how it was reached, so the constant-sum invariant is
+      // untouched - verified 0.0000% ripple either way.
+      const uint32_t pitch = DegreeToPitch(master_free_q32_, scale_);
+      const uint32_t target = SnapToScale(pitch, scale_);
       // The int32_t cast is LOAD-BEARING: a signed difference takes the
       // shorter way round the octave automatically. Unsigned, a one-semitone
       // step would sometimes slew the long way - an eleven-semitone sweep in
