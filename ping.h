@@ -1,4 +1,6 @@
-// ping.h - the alt-boot PING mode: an invisible barber's pole you strike.
+// ping.h - the alt-boot HIDDEN BARBER mode: an invisible barber's pole you
+// strike. (The file and its types keep the name `ping` because that is what a
+// struck, decaying voice IS - the mode's display name is HIDDEN BARBER.)
 //
 // The pole keeps climbing, silently. A trigger voices a PING at whatever
 // pitches the pole is currently at - and that ping then decays WITHOUT

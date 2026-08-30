@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ping_check.py - verify the alt-boot PING mode.
+ping_check.py - verify the alt-boot mode (displayed as HIDDEN BARBER; called
+PING throughout the code, because a struck decaying voice is what a ping is).
 
 The pole climbs silently; a trigger voices a snapshot of it, and that snapshot
 DECAYS WITHOUT CLIMBING. What has to be true:

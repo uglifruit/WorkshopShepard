@@ -1,12 +1,31 @@
-# SHEPARD — working notes for Claude Code
+# BARBER'S POLE — working notes for Claude Code
 
 A program card for the **Music Thing Modular Workshop System Computer**
 (RP2040), built on the header-only **ComputerCard** library. Sibling project to
 `../WorkshopSpectral`, `../WorkshopZX`, `../WorkshopBio`, `../Workshop2D2` —
 reuse their conventions where they fit.
 
-**SHEPARD generates Shepard–Risset tones**: octave-spaced components sliding
-through a fixed spectral envelope, so pitch appears to rise or fall forever.
+**BARBER'S POLE generates Shepard–Risset tones**: octave-spaced components
+sliding through a fixed spectral envelope, so pitch appears to rise or fall
+forever. The alt-boot mode is **HIDDEN BARBER**.
+
+## Naming — the code does NOT follow the product name
+
+The card was called SHEPARD during development and renamed late. **The code was
+deliberately left alone**, and the reason matters if you are tempted to
+"finish" the rename:
+
+- `namespace shepard`, `shepard.h/.cpp`, `SHEPARD_*` guards, `RenderShepard()`
+  and the `shepard.uf2` target all stay. **"Shepard tone" is the technical name
+  of the illusion the DSP implements**, not a product name — renaming it would
+  make the code describe the marketing instead of the mechanism, and the
+  comments would still have to say "Shepard–Risset" everywhere.
+- `ping.h`, `PingVoice`, `PingBank`, `ping_mode_` and `ping_check.py` stay.
+  A **ping is what a struck, decaying voice is**; HIDDEN BARBER is what the
+  mode is called on the panel.
+
+So: **product names in `README.md`, `info.yaml` and `docs/`; mechanism names in
+the source.** The repository is still `WorkshopShepard` and that is fine.
 
 ## Current status: v0.2.0, approaching release
 
@@ -554,6 +573,8 @@ much better behaved than the comb it replaced, because it transposes rather
 than resonates — level barely depends on source type.
 
 ### 17. PING replaced SPIRAL as the alt-boot
+
+(PING is the internal name; the mode is displayed as HIDDEN BARBER.)
 
 SPIRAL was rejected by ear. It was a competent pitch-shifting delay but had
 nothing to do with the card's own idea, and it spent 128 KB saying so.

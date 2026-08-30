@@ -1,5 +1,11 @@
-// SHEPARD - a Shepard-Risset infinite-glissando card for the Music Thing
-// Modular Workshop System Computer.
+// BARBER'S POLE - a Shepard-Risset infinite-glissando card for the Music
+// Thing Modular Workshop System Computer.
+//
+// The card is BARBER'S POLE; the alt-boot mode is HIDDEN BARBER. The code
+// keeps the names `shepard` and `ping` throughout, deliberately: "Shepard
+// tone" is the technical name of the illusion the DSP implements, and a
+// "ping" is what a struck voice actually sounds like. Renaming either would
+// make the code describe the product instead of the mechanism.
 //
 // A Shepard tone is octave-spaced components sliding together through a fixed
 // spectral envelope. Each fades in at the bottom, rises, and fades out at the

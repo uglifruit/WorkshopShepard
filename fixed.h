@@ -1,4 +1,4 @@
-// fixed.h - fixed-point primitives for SHEPARD.
+// fixed.h - fixed-point primitives for BARBER'S POLE.
 //
 // The RP2040's Cortex-M0+ has no FPU. A float multiply is soft-emulated at
 // ~360 ns against a 20.8 us per-SAMPLE budget, so a single float in the audio

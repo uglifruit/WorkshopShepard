@@ -1,5 +1,5 @@
 draft: true
-Name: SHEPARD
+Name: Barber's Pole
 Description: "DRAFT (on hardware, still being shaken out): an infinite glissando — Shepard-Risset tones that rise or fall forever, as sine tones or by octave-stacking live audio"
 Language: C++ (ComputerCard)
 Creator: Andy Jenkinson (uglifruit)
@@ -25,9 +25,10 @@ tags:
   - synth
   - pitch-shift
   - shepard
+  - barbers-pole
   - glissando
   - scale
-  - frequency-shifter
+  - octave-stack
   - percussion
 
 summary: |
@@ -37,7 +38,7 @@ summary: |
   there is no released binary. Treat the details below as current intent rather
   than as settled fact.<br><br>
 
-  SHEPARD generates Shepard-Risset tones: the auditory illusion of a pitch that
+  BARBER'S POLE generates Shepard-Risset tones: the auditory illusion of a pitch that
   glides forever upward or downward without ever leaving its range. Octave-spaced
   components slide together through a fixed spectral envelope, each fading in at
   the bottom and out at the top; because the stack is octave-spaced, sliding it
@@ -71,7 +72,7 @@ summary: |
   at that phase, so the two together drive a VCA and oscillator as one Shepard
   layer made external.<br><br>
 
-  ALT-BOOT - PING: holding the switch DOWN at power-on makes the pole climb
+  ALT-BOOT - HIDDEN BARBER: holding the switch DOWN at power-on makes the pole climb
   SILENTLY. A trigger on Pulse In 1 voices a ping at whatever pitches the pole
   has reached, and that ping decays WITHOUT climbing - it is a snapshot, not a
   window onto the moving stack. Trigger repeatedly and each ping comes from a
@@ -109,7 +110,7 @@ summary: |
   pass.<br><br>
 
   Flash 1.4%, RAM 57%, both from the linker. Measured on hardware, the normal
-  engine has comfortable margin; PING at four simultaneous voices with the live
+  engine has comfortable margin; HIDDEN BARBER at four simultaneous voices with the live
   input mixed in sits close to the ceiling - see the note above.
 
 panel:
@@ -137,8 +138,8 @@ panel:
       description: >
         In normal boot: holds the stack while high and resumes from exactly
         where it paused, so releasing never jumps ahead; its rising edge also
-        advances one scale degree in the stepped modes. In PING: the strike
-        trigger, which does not freeze the pole.
+        advances one scale degree in the stepped modes. In HIDDEN BARBER: the
+        strike trigger, which does not freeze the pole.
     - id: PulseIn2
       name: Reverse
       type: pulse
@@ -195,7 +196,7 @@ controls:
       x:
         name: DENSITY
         description: >
-          Number of octave layers, 3 to 12. Higher counts make the illusion
+          Number of octave layers, 3 to 11. Higher counts make the illusion
           smoother and more convincing; lower counts leave the individual
           octaves audible.
       y:
@@ -207,7 +208,7 @@ controls:
       main:
         name: QUANTISE
         description: >
-          Smooth glissando, or one of four scales that repeat every octave:
+          Smooth glissando, or one of six scales that repeat every octave:
           chromatic (0 1 2 3 4 5 6 7 8 9 10 11), major (0 2 4 5 7 9 11), minor
           (0 2 3 5 7 8 10), pentatonic (0 2 4 7 9), diminished
           (0 2 3 5 6 8 9 11) or whole tone (0 2 4 6 8 10). In a rising glide
@@ -227,7 +228,7 @@ controls:
         description: >
           Output level. Holds its current value until the knob is actually
           moved, so changing page never drops the volume.
-    - when: Switch Middle (page 1), PING alt-boot
+    - when: Switch Middle (page 1), HIDDEN BARBER alt-boot
       main:
         name: POLE SPEED
         description: >
@@ -242,18 +243,19 @@ controls:
         description: >
           Internal sines anticlockwise, your own input octave-stacked and
           gated by the ping envelope clockwise.
-    - when: Switch Up (page 2), PING alt-boot
+    - when: Switch Up (page 2), HIDDEN BARBER alt-boot
       main:
         name: QUANTISE
         description: >
-          Smooth, 12-ET, major, minor or pentatonic - as in normal boot, so
+          Smooth, 12-ET, major, minor, pentatonic, diminished or whole tone
+          - as in normal boot, so
           strikes land on scale degrees rather than anywhere on the glide.
           One of the most playable things about this mode.
       x:
         name: DECAY
         description: >
           How long each ping rings, from a 17ms click to a 1.7s bell. Stereo
-          width has no knob in PING and sits at a fixed modest spread.
+          width has no knob in HIDDEN BARBER and sits at a fixed modest spread.
       y:
         name: LEVEL
         description: >
@@ -284,5 +286,5 @@ controls:
           name: Boot mode
           description: >
             LEDs 0, 2 and 4 light together for a normal boot; LEDs 1, 3 and 5
-            for the PING alt-boot. Held for about three quarters of a second
+            for the HIDDEN BARBER alt-boot. Held for about three quarters of a second
             after the switch is read.

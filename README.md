@@ -1,7 +1,10 @@
-# SHEPARD
+# BARBER'S POLE
 
 An infinite glissando for the Music Thing Modular Workshop System Computer —
 a pitch that rises or falls forever without ever leaving its range.
+
+Named for the illusion it borrows from: a striped pole turning on its axis,
+where every stripe travels upward and none of them ever arrives.
 
 > ## ⚠️ DRAFT — on hardware, still being shaken out
 >
@@ -205,21 +208,22 @@ to an oscillator's V/oct and CV Out 2 to a VCA, and it rises in pitch while
 swelling and fading, then the next cycle begins. Add more voices patched the
 same way and offset, and you can build the illusion outside the card.
 
-## PING mode (alt-boot)
+## HIDDEN BARBER (alt-boot)
 
 **Hold the switch DOWN at power-on.**
 
-The pole keeps climbing — but silently. A trigger on Pulse In 1 voices a
-**ping** at whatever pitches the pole has reached, and that ping decays
-*without climbing*, because it is a snapshot rather than a window onto the
-moving stack.
+The pole keeps climbing — but silently, which is where the name comes from:
+the barber is still there, still turning, and you only see him when you strike
+him. A trigger on Pulse In 1 voices a **ping** at whatever pitches the pole has
+reached, and that ping decays *without climbing*, because it is a snapshot
+rather than a window onto the moving stack.
 
 So the illusion runs the whole time and you only hear where it happens to be
 at the moments you strike it. Trigger repeatedly and each ping comes from a
 different point on the pole, building a chord out of one silently-rising
 structure. Because the pole wraps every octave, the pitches available are
-endless but bounded — the barber's pole becomes something you play rather than
-something you listen to.
+endless but bounded — the pole becomes something you play rather than something
+you listen to.
 
 ### Switch MIDDLE — page 1
 
@@ -233,7 +237,7 @@ something you listen to.
 
 | Knob | Function |
 |---|---|
-| **Main** | **Quantise** — smooth, 12-ET, major, minor, pentatonic. Strikes land on scale degrees rather than anywhere on the glide |
+| **Main** | **Quantise** — smooth, 12-ET, major, minor, pentatonic, diminished, whole tone. Strikes land on scale degrees rather than anywhere on the glide |
 | **X** | **Ping decay** — 17 ms click to a 1.7 s ring |
 | **Y** | **Output level** |
 
@@ -367,12 +371,19 @@ build — it is empty until the card has been tested on hardware.
 
 ## Status
 
-**Not yet tested on hardware.** Everything above about how it sounds is a
-prediction from the algorithm and from the host tests, not an observation.
+**Played on hardware across several sessions**, which is where most of what is
+written above comes from. Twenty-six distinct faults were found by listening
+and fixed — among them a click at every octave wrap, a glide running 32× slow,
+two live-input designs rejected by ear before the third worked, and a level
+mismatch between the two sources.
 
-`docs/BRINGUP.md` is an ordered first session with the card — what to check,
-in what order, what each failure would look like, and which test to re-run for
-each. Read CV Out 2 before judging the sound.
+What has *not* been confirmed by ear is the most recent round: the source
+levels now match to within about 2 dB at every layer count, and the Y crossfade
+holds constant power through the middle. Both measure correctly on the host.
+
+`docs/BRINGUP.md` is an ordered first session with the card. It predates most
+of those findings, and its CV Out 2 steps no longer apply — that diagnostic
+meter was removed once it had served its purpose.
 
 ## Credits
 
@@ -380,7 +391,8 @@ Built on Chris Johnson's header-only
 [ComputerCard](https://github.com/TomWhitwell/Workshop_Computer) library for
 the Music Thing Modular Workshop System.
 
-The Shepard tone is Roger Shepard's (1964); the continuous glissando form is
+The name is the visual illusion the sound is usually compared to. The tone
+itself is Roger Shepard's (1964); the continuous glissando form is
 Jean-Claude Risset's.
 
 Sibling card to [WorkshopSpectral](https://github.com/uglifruit/WorkshopSpectral),
