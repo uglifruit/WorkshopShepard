@@ -28,6 +28,47 @@ const int16_t kInvSqrtN[kMaxLayers + 1] = {
    9880,                   // N = 11   0.301511
 };
 
+// The LIVE path's normaliser, and it is deliberately NOT 1/sqrt(N).
+//
+// 1/sqrt(N) is correct for the oscillator bank because those layers are
+// mutually incoherent - different frequencies, unrelated phases - so their
+// POWERS add and the total grows as sqrt(N).
+//
+// The live path is N copies of the SAME source transposed by octaves. Those
+// are partially CORRELATED, so the sum grows faster than sqrt(N). Measured
+// against a full-scale drone with the normaliser divided back out:
+//
+//     N= 3  raw  554.0        raw amplitude grows as N^0.70
+//     N= 5  raw  736.2        (incoherent would be N^0.5,
+//     N= 7  raw  919.9         fully coherent N^1.0)
+//     N= 9  raw 1133.9
+//     N=11  raw 1367.1
+//
+// So 1/sqrt(N) OVER-normalises it, and does so worst at low N. Heard on
+// hardware as the audio path being quiet, and quieter still with few layers -
+// which is exactly how it was reported.
+//
+// Values are 1/N^0.70, scaled so N=8 coincides with kInvSqrtN[8]. That keeps
+// the reference point where the two paths already agreed and moves the rest
+// to meet it: measured live rms is now 357-389 across N=3..11, against the
+// synth's flat 443, with at least 3.0 dB of peak headroom everywhere.
+//
+// The exponent is measured, not derived. If the octave stack's structure ever
+// changes, re-measure it - tools/passthru_check.py::check_live_level_flat
+// asserts the flatness this produces.
+const int16_t kInvPowN[kMaxLayers + 1] = {
+      0,      0,      0,   // N = 0,1,2 unused; present so N indexes directly
+  23018,                   // N = 3
+  18820,                   // N = 4
+  16098,                   // N = 5
+  14169,                   // N = 6
+  12720,                   // N = 7
+  11585,                   // N = 8   coincides with kInvSqrtN[8]
+  10668,                   // N = 9
+   9910,                   // N = 10
+   9270,                   // N = 11
+};
+
 // Scale degrees as Q32 offsets within one octave: degree at c cents is
 // round(c / 1200 * 2^32). Read-only, so flash is correct.
 //

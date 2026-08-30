@@ -293,8 +293,16 @@ class ShepardCard : public ComputerCard {
  private:
   // --- the oscillator bank ------------------------------------------------
   void __not_in_flash_func(RenderShepard)(int32_t* out_l, int32_t* out_r) {
-    int32_t acc_l = 0;
-    int32_t acc_r = 0;
+    // The two sources accumulate SEPARATELY because they need DIFFERENT
+    // normalisers: the oscillator bank is incoherent (1/sqrt(N)), the octave
+    // stack is correlated copies of one input (1/N^0.70). Mixing first and
+    // normalising once - which is what this did originally - applies the
+    // wrong law to whichever source dominates, and left the live path quiet
+    // and layer-count dependent. See kInvPowN in shepard.cpp.
+    int32_t syn_l = 0;
+    int32_t syn_r = 0;
+    int32_t liv_l = 0;
+    int32_t liv_r = 0;
 
     // The live-audio path OCTAVE-STACKS the input: N read heads on one delay
     // line at 2^i the write rate, so every partial of the source is transposed
@@ -324,16 +332,32 @@ class ShepardCard : public ComputerCard {
         filtered = octave_.Read(i, oct_rate_[i]);
       }
 
-      // Crossfade the two sources, then apply this layer's window gain.
-      const int32_t v = MulQ15(synth, 32767 - source_mix_) +
-                        MulQ15(filtered, source_mix_);
-
-      acc_l += MulQ15(v, win_l_[i]);
-      acc_r += MulQ15(v, win_r_[i]);
+      // Window each source into its own accumulator. The crossfade happens
+      // after normalisation, below, because the two need different laws.
+      syn_l += MulQ15(synth, win_l_[i]);
+      syn_r += MulQ15(synth, win_r_[i]);
+      liv_l += MulQ15(filtered, win_l_[i]);
+      liv_r += MulQ15(filtered, win_r_[i]);
     }
 
-    // 1/sqrt(N), because the layers are incoherent so their POWERS add.
+    // Normalise each source by ITS OWN law, then crossfade at equal power.
     //
+    // 1/sqrt(N) for the bank, because those layers are incoherent so their
+    // powers add. 1/N^0.70 for the stack, because those layers are correlated
+    // copies of one input - measured, see kInvPowN.
+    //
+    // The crossfade is cos/sin rather than linear. Two unrelated signals
+    // faded linearly lose 3 dB at the midpoint, which is heard as the synth
+    // dominating everywhere but the extremes of the knob. XfadeQ15 reads both
+    // legs out of sin_lut, so this costs no new table.
+    const int32_t syn = MulQ15(syn_l, inv_sqrt_n_);
+    const int32_t liv = MulQ15(liv_l, inv_pow_n_);
+    const int32_t syn2 = MulQ15(syn_r, inv_sqrt_n_);
+    const int32_t liv2 = MulQ15(liv_r, inv_pow_n_);
+
+    int32_t gs, gl;
+    XfadeQ15(source_mix_, &gs, &gl);
+
     // The final >> 5 is the output scaling, and it is MEASURED, not assumed -
     // tools/passthru_check.py runs the whole integer chain and reports the
     // peak. At >> 4 the card peaks at 1754 against a 2047 rail and sits in
@@ -343,11 +367,8 @@ class ShepardCard : public ComputerCard {
     // If any gain in this path changes, re-run that test. The sibling card
     // shipped a 512x scaling error to hardware that every MODELLED test
     // passed - only running the real arithmetic catches it.
-    // 1/sqrt(N) must follow the FRACTIONAL count too, or the level steps at
-    // each integer boundary even though the layers no longer do.
-    const int32_t g = inv_sqrt_n_;
-    *out_l = MulQ15(acc_l, g) >> 5;
-    *out_r = MulQ15(acc_r, g) >> 5;
+    *out_l = (MulQ15(syn, gs) + MulQ15(liv, gl)) >> 5;
+    *out_r = (MulQ15(syn2, gs) + MulQ15(liv2, gl)) >> 5;
   }
 
   // --- the alt-boot delay --------------------------------------------------
@@ -395,6 +416,18 @@ class ShepardCard : public ComputerCard {
       }
     }
 
+    // Equal-power crossfade legs, as in RenderShepard - a linear fade between
+    // two unrelated sources dips 3 dB at the midpoint. Hoisted out of the
+    // voice loop because the mix does not change within a sample.
+    //
+    // Unlike normal boot this path does NOT normalise the two sources
+    // separately: each voice's envelope shapes both, so they share an
+    // accumulator. The layer counts here are per-voice and often differ, so
+    // there is no single N to normalise the live side by - and PING is struck
+    // rather than held, so a standing level difference matters far less.
+    int32_t gs, gl;
+    XfadeQ15(source_mix_, &gs, &gl);
+
     for (int v = 0; v < kPingVoices; ++v) {
       PingVoice& voice = ping_.Voice(v);
       if (!voice.Active()) continue;
@@ -407,7 +440,7 @@ class ShepardCard : public ComputerCard {
 
         if (source_mix_ > 0) {
           const int32_t w = MulQ15(wet[i], env);
-          sig = MulQ15(sig, 32767 - source_mix_) + MulQ15(w, source_mix_);
+          sig = MulQ15(sig, gs) + MulQ15(w, gl);
         }
 
         acc_l += MulQ15(sig, voice.WinL(i));
@@ -728,6 +761,10 @@ class ShepardCard : public ComputerCard {
     {
       const int32_t target = kInvSqrtN[layers_];
       inv_sqrt_n_ += (target - inv_sqrt_n_) >> 5;   // ~20 ms
+      // The live path's normaliser is slewed on the same clock, for the same
+      // reason. Different LAW (1/N^0.70, see kInvPowN), identical treatment.
+      const int32_t target_p = kInvPowN[layers_];
+      inv_pow_n_ += (target_p - inv_pow_n_) >> 5;
     }
 
     for (int i = 0; i < active_layers_; ++i) {
@@ -1023,6 +1060,7 @@ class ShepardCard : public ComputerCard {
   int layers_ = 6;
   int active_layers_ = 6;   // layers_ + 1 while a new layer is fading in
   int32_t inv_sqrt_n_ = 13377;
+  int32_t inv_pow_n_ = 14169;   // kInvPowN[6], matching inv_sqrt_n_'s N=6
   int scale_ = 0;
   int32_t source_mix_ = 0;
   bool shift_up_ = true;   // glide direction, for Pulse In 1 stepping

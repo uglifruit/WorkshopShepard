@@ -38,7 +38,11 @@ import wave
 
 SR = 48000
 MIN_LAYERS = 3
+# Array sizing only. The CARD's cap is 11 - at 12 the top layer sits above
+# Nyquist, carries window gain but makes no sound, and drops the audible
+# centre a semitone. See kMaxLayers in shepard.h.
 MAX_LAYERS = 12
+CARD_MAX_LAYERS = 11
 BASE_INC = 1229782          # 13.75 Hz (A-1) as a Q32 phase increment
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +68,12 @@ for _i in range(257):
 INV_SQRT_N = [0, 0, 0, 18919, 16384, 14654, 13377, 12385,
               11585, 10923, 10362, 9880]
 
+# The LIVE path's normaliser: 1/N^0.70, not 1/sqrt(N). Mirrors kInvPowN in
+# shepard.cpp - the octave stack's layers are correlated copies of one source,
+# so they sum faster than incoherent oscillators do.
+INV_POW_N = [0, 0, 0, 23018, 18820, 16098, 14169, 12720,
+             11585, 10668, 9910, 9270]
+
 SCALE12 = [0x00000000, 0x15555555, 0x2AAAAAAB, 0x40000000,
            0x55555555, 0x6AAAAAAB, 0x80000000, 0x95555555,
            0xAAAAAAAB, 0xC0000000, 0xD5555555, 0xEAAAAAAB]
@@ -84,6 +94,16 @@ def sin_q15(phase):
     s0 = SIN_LUT[idx]
     s1 = SIN_LUT[(idx + 1) & 1023]
     return s0 + mul_q15(frac, s1 - s0)
+
+
+def xfade_q15(mix):
+    """Equal-power crossfade legs, from the sine table. Mirrors XfadeQ15.
+
+    Returns (g_synth, g_live). A linear fade between two UNRELATED sources
+    dips 3 dB at the midpoint; cos/sin holds the power flat.
+    """
+    return (sin_q15(((32767 - mix) << 15) & 0xFFFFFFFF),
+            sin_q15((mix << 15) & 0xFFFFFFFF))
 
 
 def hann_q15(u):
@@ -190,6 +210,7 @@ class Engine:
         self.win_phase = 0
         self.active = layers
         self.inv_sqrt = INV_SQRT_N[layers]
+        self.inv_pow = INV_POW_N[layers]
         self.prev_master = None
         self.octave = OctaveStack()
         self.rate = 0
@@ -274,8 +295,10 @@ class Engine:
             if audio_in and self.source_mix > 0:
                 self.octave.write_sample(audio_in[k] << 5)
 
-            acc_l = 0
-            acc_r = 0
+            syn_l = 0
+            syn_r = 0
+            liv_l = 0
+            liv_r = 0
             for i in range(self.layers):
                 synth = 0
                 if self.source_mix < 32767:
@@ -286,15 +309,22 @@ class Engine:
                 if self.source_mix > 0:
                     filtered = self.octave.read(i, self.oct_rate[i])
 
-                v = (mul_q15(synth, 32767 - self.source_mix) +
-                     mul_q15(filtered, self.source_mix))
-                acc_l += mul_q15(v, self.win_l[i])
-                acc_r += mul_q15(v, self.win_r[i])
+                syn_l += mul_q15(synth, self.win_l[i])
+                syn_r += mul_q15(synth, self.win_r[i])
+                liv_l += mul_q15(filtered, self.win_l[i])
+                liv_r += mul_q15(filtered, self.win_r[i])
 
+            # Each source gets ITS OWN normalisation law, then the two are
+            # crossfaded at equal power. See kInvPowN / XfadeQ15.
             self.inv_sqrt += (INV_SQRT_N[self.layers] - self.inv_sqrt) >> 5
-            g = self.inv_sqrt
-            left.append(soft_clip_out(mul_q15(acc_l, g) >> 5))
-            right.append(soft_clip_out(mul_q15(acc_r, g) >> 5))
+            self.inv_pow += (INV_POW_N[self.layers] - self.inv_pow) >> 5
+            gs, gl = xfade_q15(self.source_mix)
+            sl = mul_q15(syn_l, self.inv_sqrt)
+            sr = mul_q15(syn_r, self.inv_sqrt)
+            vl = mul_q15(liv_l, self.inv_pow)
+            vr = mul_q15(liv_r, self.inv_pow)
+            left.append(soft_clip_out((mul_q15(sl, gs) + mul_q15(vl, gl)) >> 5))
+            right.append(soft_clip_out((mul_q15(sr, gs) + mul_q15(vr, gl)) >> 5))
         return left, right
 
 
@@ -585,6 +615,28 @@ def analyse_seam(layers, wraps=6, rate=1.0):
             seam_max = max(seam_max, max(diffs[lo:hi]))
     seam_ratio = seam_max / max_diff if max_diff else 0.0
 
+    # IS THAT MAXIMUM UNIQUE? If not, the ratio means nothing.
+    #
+    # This is the third measure in this file to need a correction of exactly
+    # this kind, and the reason is always the same: a ratio can only separate
+    # signal from noise if its denominator IS the signal.
+    #
+    # At low layer counts the signal is a handful of low sines, so the
+    # largest sample-to-sample jump in the WHOLE render is a few LSB of
+    # quantisation - and thousands of samples tie at it. Whether one of those
+    # ties happens to land within the seam guard is then luck, so N=3 scored
+    # a flat 1.0000 and was condemned as broken.
+    #
+    # Measured, at N=3 over 8 wraps:
+    #     real build     max diff 5   shared by 27,975 samples  (3.6%)
+    #     broken control max diff 8   shared by 5      samples  (0.0%)
+    #
+    # A genuine discontinuity is a large jump that stands ALONE. So the tie
+    # count is reported alongside the ratio, and a maximum shared by more
+    # than a handful of samples disqualifies the verdict rather than
+    # producing one.
+    ties = sum(1 for v in diffs if v == max_diff)
+
     # --- 3. periodic HF splatter ---
     # First difference is a crude highpass; fold it at the wrap period the
     # same way as the level.
@@ -599,7 +651,7 @@ def analyse_seam(layers, wraps=6, rate=1.0):
     hf_means = [sum(v) / len(v) for v in hf_folded.values() if v]
     hf_ratio = (max(hf_means) / min(hf_means)) if hf_means and min(hf_means) > 0 else 99.0
 
-    return level_ratio, seam_ratio, hf_ratio
+    return level_ratio, seam_ratio, hf_ratio, ties, max_diff, len(diffs)
 
 
 def check_seams():
@@ -612,9 +664,12 @@ def check_seams():
     print("  SEAM ANALYSIS - is the octave wrap detectable?")
     print("    Verdict is on SEAM STEP: the largest sample jump near a wrap,")
     print("    over the largest jump anywhere. 1.00 means the biggest")
-    print("    discontinuity in the whole signal sits exactly at the seam.")
+    print("    discontinuity in the whole signal sits exactly at the seam -")
+    print("    but ONLY if that maximum is unique. A maximum shared by many")
+    print("    samples is the quantisation floor, not a seam, and the ratio")
+    print("    is then meaningless (see analyse_seam's note on ties).")
     print("    (level and HF are reported for information - calibration")
-    print("    showed they do not discriminate; see analyse_seam's note.)\n")
+    print("    showed they do not discriminate either.)\n")
 
     # --- control: prove the measure responds to a real defect ---
     import builtins
@@ -627,28 +682,40 @@ def check_seams():
         return mul_q15(s, s)
 
     this.hann_q15 = truncated
-    ctrl_lv, ctrl_sm, ctrl_hf = analyse_seam(3)
+    ctrl_lv, ctrl_sm, ctrl_hf, ctrl_ties, ctrl_mx, len_diffs = analyse_seam(3)
     this.hann_q15 = good_hann
 
     print(f"    control (window lookup deliberately truncated):")
-    print(f"      N=  3  seam step {ctrl_sm:.4f}   <- a known-broken build\n")
+    print(f"      N=  3  seam step {ctrl_sm:.4f}  max jump {ctrl_mx} "
+          f"shared by {ctrl_ties}   <- a known-broken build\n")
 
-    print(f"    {'N':>3}  {'seam step':>10}  {'level':>8}  {'HF':>8}   verdict")
+    print(f"    {'N':>3}  {'seam step':>10}  {'max':>5}  {'ties':>7}  "
+          f"{'level':>8}  {'HF':>8}   verdict")
 
     ok = True
     results = []
-    for layers in (3, 4, 6, 8, 12):
-        lv, sm, hf = analyse_seam(layers)
-        results.append((layers, lv, sm, hf))
-        bad = sm > 0.98
+    for layers in (3, 4, 6, 8, CARD_MAX_LAYERS):
+        lv, sm, hf, ties, mx, _n = analyse_seam(layers)
+        results.append((layers, lv, sm, hf, ties))
+        # A maximum shared by a large FRACTION of samples is the
+        # quantisation floor, not a discontinuity. Measured over 768k
+        # samples: the broken control ties at 0.004% while the N=3 false
+        # positive ties at 1.456% - a factor of 350, so 0.5% separates them
+        # with a wide margin and no case sits near the line.
+        noisy = ties > len_diffs * 0.005
+        bad = (sm > 0.98) and not noisy
         if bad:
             ok = False
-        print(f"    {layers:3d}  {sm:10.4f}  {lv:8.4f}  {hf:8.4f}   "
-              f"{'SEAM' if bad else 'seamless'}")
+        verdict = "SEAM" if bad else ("no unique jump" if noisy else "seamless")
+        print(f"    {layers:3d}  {sm:10.4f}  {mx:5d}  {ties:7d}  "
+              f"{lv:8.4f}  {hf:8.4f}   {verdict}")
 
-    # Is the detector actually discriminating on this run?
-    best = min(r[2] for r in results)
-    discriminating = ctrl_sm - best > 0.05
+    # Is the detector actually discriminating on this run? Compare against the
+    # best score among layer counts that HAVE a unique maximum - a tied one
+    # tells us nothing either way.
+    usable = [r[2] for r in results if r[4] <= len_diffs * 0.005]
+    best = min(usable) if usable else 1.0
+    discriminating = (ctrl_ties <= len_diffs * 0.005) and (ctrl_sm - best) > 0.05
 
     print()
     if not discriminating:
@@ -713,6 +780,109 @@ def spectrograms(names):
         print(f"    {os.path.basename(png)}")
 
 
+def check_live_levels():
+    """The LIVE path's level, across density and across the crossfade.
+
+    Two hardware reports, both about the same thing seen from opposite ends:
+
+      "the audio in/out seems very quiet compared to the generated tones"
+      "actually depends on the number of layers of notes"
+      "when the X knob is CW the internal sounds massively dominate"
+
+    Three distinct faults were behind them, and this pins all three.
+
+    1. 1/sqrt(N) IS THE WRONG LAW FOR THE LIVE PATH. It is correct for the
+       oscillator bank, whose layers are incoherent so their powers add. The
+       octave stack is N CORRELATED copies of one source; measured growth is
+       N^0.70, so 1/sqrt(N) over-normalises, worst at low N. Fixed by
+       kInvPowN.
+
+    2. THE CROSSFADE WAS LINEAR. Two unrelated sources faded linearly lose
+       3 dB at the midpoint, so the mix sat below BOTH sources - which reads
+       as whichever source is louder dominating. Fixed by XfadeQ15 (cos/sin
+       out of the existing sine table).
+
+    3. CREST FACTOR, which is NOT a fault and is not fixed here - recorded so
+       it is not chased later. The live path's crest is ~3.8 against the
+       synth's ~1.8, because correlated copies peak together. At matched
+       PEAK it therefore carries ~6 dB less RMS. Loudness follows RMS and the
+       rail is set by peak, so the live path will always sound a little
+       softer than its peak level suggests. Raising its gain to match by ear
+       would clip it.
+    """
+    print("  live path level (kInvPowN + equal-power crossfade):")
+    n = SR // 2
+    src = make_test_input(n, 'drone')
+    pk = max(abs(v) for v in src)
+    src = [v * 2047 // pk for v in src]
+
+    ok = True
+    lv = []
+    for N in range(MIN_LAYERS, CARD_MAX_LAYERS + 1):
+        e = Engine(layers=N, source_mix=32767)
+        e.set_rate(0.25)
+        left, _ = e.render(n, audio_in=src)
+        r = math.sqrt(sum(v * v for v in left) / n)
+        peak = max(abs(v) for v in left)
+
+        e = Engine(layers=N, source_mix=0)
+        e.set_rate(0.25)
+        sl, _ = e.render(n)
+        s = math.sqrt(sum(v * v for v in sl) / n)
+
+        d = 20 * math.log10(r / s)
+        hd = 20 * math.log10(2047 / peak) if peak else 99
+        lv.append(r)
+        flag = "ok"
+        if abs(d) > 3.0:
+            flag = "TOO FAR FROM SYNTH"
+            ok = False
+        elif peak > 2047:
+            flag = "CLIPS"
+            ok = False
+        print(f"    N={N:2d}: live {r:6.1f}  synth {s:6.1f}  {d:+5.1f} dB  "
+              f"peak {peak:5d} ({hd:+.1f} dB)  {flag}")
+
+    spread = 20 * math.log10(max(lv) / min(lv))
+    print(f"    spread across density: {spread:.1f} dB", end="  ")
+    if spread <= 1.5:
+        print("flat  ok")
+    else:
+        print("VARIES WITH DENSITY - check kInvPowN")
+        ok = False
+
+    # The crossfade legs themselves.
+    worst = 0.0
+    for mix in range(0, 32768, 97):
+        gs, gl = xfade_q15(mix)
+        p = math.sqrt((gs / 32767.0) ** 2 + (gl / 32767.0) ** 2)
+        worst = max(worst, abs(p - 1.0))
+    print(f"    crossfade power deviation: {worst * 100:.4f}%", end="  ")
+    if worst < 0.01:
+        print("equal power  ok")
+    else:
+        print("NOT EQUAL POWER")
+        ok = False
+
+    # End to end: the midpoint must not sit below both ends. That is the
+    # signature of a linear fade between uncorrelated sources.
+    for N in (3, 7, 11):
+        lev = []
+        for mix in (0, 16384, 32767):
+            e = Engine(layers=N, source_mix=mix)
+            e.set_rate(0.25)
+            left, _ = e.render(n, audio_in=src)
+            lev.append(math.sqrt(sum(v * v for v in left) / n))
+        floor = min(lev[0], lev[2])
+        d = 20 * math.log10(lev[1] / floor)
+        flag = "ok" if d > -1.5 else "MID-FADE DIP - linear crossfade?"
+        if d <= -1.5:
+            ok = False
+        print(f"    N={N:2d}: synth {lev[0]:6.1f}  mid {lev[1]:6.1f}  "
+              f"live {lev[2]:6.1f}   mid vs quieter end {d:+5.1f} dB  {flag}")
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -733,9 +903,11 @@ def main():
     # question without needing anyone to listen.
     seam_ok = check_seams()
     print()
+    level_ok = check_live_levels()
+    print()
 
     if args.analyse_only:
-        return 0 if seam_ok else 1
+        return 0 if (seam_ok and level_ok) else 1
 
     names = []
     names += render_wrap_seam(args.seconds)

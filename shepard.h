@@ -174,6 +174,41 @@ static inline int32_t __not_in_flash_func(Pow2Q30)(uint32_t f_q32) {
 // would make dense settings audibly quiet.
 extern const int16_t kInvSqrtN[];   // [kMaxLayers + 1]
 
+// The LIVE path's normaliser: 1/N^0.70, NOT 1/sqrt(N). The octave stack's
+// layers are correlated copies of one source rather than independent
+// oscillators, so they sum faster than sqrt(N). See the derivation and the
+// measurements in shepard.cpp - using kInvSqrtN here leaves the audio path
+// audibly quiet, and worst at low layer counts.
+extern const int16_t kInvPowN[];    // [kMaxLayers + 1]
+
+// EQUAL-POWER crossfade legs for the source mix, from sin_lut - no new table.
+//
+// A linear crossfade (`v = a*(1-m) + b*m`) is correct only when the two
+// signals are the same, or correlated. The synth and the live stack are
+// neither: they are unrelated, so their POWERS add and a linear fade dips
+// 3 dB in the middle -
+//
+//     mix    linear   equal-power
+//     0.00    1.000       1.000
+//     0.25    0.791       1.000
+//     0.50    0.707       1.000      <- the audible dip
+//     0.75    0.791       1.000
+//     1.00    1.000       1.000
+//
+// which is heard as the internal voice dominating everywhere except the
+// extremes, because the fade robs the middle of the knob rather than the ends.
+//
+// cos/sin holds the power flat instead. Both legs come from the EXISTING sine
+// table: mix spans a quarter turn, so `mix << 15` is the live leg's phase and
+// `(32767 - mix) << 15` the synth's. Measured worst power deviation over a
+// full sweep: 0.0076%, 0.0007 dB. Same trick as HannQ15 - the table already
+// holds what is needed, so this costs two lookups and no flash.
+static inline void __not_in_flash_func(XfadeQ15)(int32_t mix, int32_t* g_synth,
+                                                 int32_t* g_live) {
+  *g_synth = SinQ15((uint32_t)(32767 - mix) << 15);
+  *g_live = SinQ15((uint32_t)mix << 15);
+}
+
 // Scale tables, as Q32 offsets within the octave. These are `const` and only
 // ever read, so flash is CORRECT for them - the opposite of sin_lut/pow2_lut
 // above. (WorkshopSpectral's kSmoothLut is the precedent.)

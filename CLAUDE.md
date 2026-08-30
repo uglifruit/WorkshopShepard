@@ -10,9 +10,10 @@ through a fixed spectral envelope, so pitch appears to rise or fall forever.
 
 ## Current status: v0.2.0, approaching release
 
-`build/shepard.uf2` — **1.35% flash, 56.7% RAM**. All host test suites pass.
+`build/shepard.uf2` — **1.38% flash, 56.83% RAM**. All six host test suites
+pass.
 
-Many listening sessions; the twenty-two findings below are what they produced.
+Many listening sessions; the findings below are what they produced.
 The normal engine has comfortable CPU margin. PING at four simultaneous voices
 with the live input mixed in sits close to the ceiling and **will** distort if
 triggered densely — that is documented as a limit rather than treated as a bug.
@@ -90,7 +91,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twenty-three findings, four of them my own changes making things worse
+## Found on HARDWARE — twenty-six findings, four of them my own changes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -800,6 +801,56 @@ genuinely true. A constant-sum window is necessary for seamlessness; it is not
 sufficient, and a test that proves the necessary condition can read as though
 it has proved the sufficient one.
 
+### 24. The live path was quiet, and the quietness tracked layer count
+
+Two reports, opposite ends of the same fault: *"the audio in/out seems very
+quiet compared to the generated tones"*, then *"actually depends on the number
+of layers of notes"*.
+
+`1/√N` was being applied to BOTH sources. It is right for the oscillator bank
+(incoherent, powers add) and wrong for the octave stack (correlated copies of
+one source, measured growth N^0.70), so the live path was over-normalised,
+worst at low N. Fixed with a second table, `kInvPowN`, and by accumulating the
+two sources separately so each is normalised by its own law before the mix.
+
+Live rms went from 320–412 across N (a 2.3 dB swing, and up to 2.9 dB below the
+synth) to 357–389 (0.8 dB swing, within 1.9 dB of the synth).
+
+Full derivation under **The live path needs a DIFFERENT normaliser**, below.
+
+### 25. The crossfade dipped 3 dB in the middle
+
+*"When the X knob is CW the internal sounds massively dominate."*
+
+The source mix was a linear crossfade. Between two UNRELATED signals that loses
+3 dB at the midpoint — the 50/50 mix measured BELOW both sources at every layer
+count (275 at N=3, against 445 synth and 389 live). Replaced with an
+equal-power cos/sin fade read out of the existing `sin_lut`; the midpoint now
+sits between the two sources, gaining 3.6 dB.
+
+Note the user also guessed the cause correctly as *"probably high frequencies
+of the synth cutting through"* — which is a real secondary effect, since the
+octave stack rolls off where the oscillators do not. The level fix addresses
+the dominant term.
+
+### 26. The seam detector was condemning N=3 — a false positive in the committed tree
+
+**Not from hardware** — found when the new level tests were added and the whole
+analysis was re-run. **N=3 had been scoring a flat 1.0000, the same as the
+deliberately-broken control, in every run since the detector was written.**
+
+The measure is "largest jump near a wrap / largest jump anywhere". At N=3 the
+largest jump anywhere is 5 LSB — the quantisation floor — and 11,183 samples
+tie at it, so whether one lands in the seam guard is luck. The broken control's
+maximum is shared by 28. A real discontinuity stands alone.
+
+The verdict now requires the maximum to be unique (≤0.5% of samples tie);
+otherwise it reports *"no unique jump"* rather than a defect.
+
+**This is the third measure in that file to fail this exact way.** Level
+periodicity and HF splatter were retired earlier for the same reason: a ratio
+only separates signal from noise when its denominator IS the signal.
+
 ## The invariant everything depends on
 
     sum over layers of hann((master_frac + i)/N)  ==  N/2   EXACTLY
@@ -990,6 +1041,84 @@ feedback there will ring for a long time. Documented behaviour of that
 position, not a fault. `spiral_check.py` runs the real loop at DC and reports
 the tail at every setting.
 
+## The live path needs a DIFFERENT normaliser — 1/N^0.70, not 1/√N
+
+Reported from hardware twice, from opposite ends, and both reports were the
+same fault: *"the audio in/out seems very quiet compared to the generated
+tones"*, then *"actually depends on the number of layers of notes"*.
+
+`1/√N` is correct for the **oscillator bank**. Those layers are mutually
+incoherent — different frequencies, unrelated phases — so their *powers* add
+and the sum grows as √N.
+
+The **octave stack is N copies of one source** transposed by octaves. Those are
+partially *correlated*, so they sum faster. Measured with the normaliser
+divided back out:
+
+    N= 3  raw  554.0        grows as N^0.70
+    N= 5  raw  736.2        (incoherent N^0.5, fully coherent N^1.0)
+    N= 7  raw  919.9
+    N= 9  raw 1133.9
+    N=11  raw 1367.1
+
+So `1/√N` over-normalises the live path, worst at low N — which is exactly the
+layer-count dependence that was heard. `kInvPowN` fixes it: live rms is now
+357–389 across N=3..11 against the synth's flat 443, spread 0.8 dB.
+
+The two sources therefore **accumulate separately** in `RenderShepard` and are
+normalised before the crossfade. Mixing first and normalising once applies the
+wrong law to whichever source dominates.
+
+## The source crossfade is EQUAL POWER, from `sin_lut`
+
+The synth and the octave stack are unrelated signals, so a linear crossfade
+loses 3 dB in the middle — the mix sat *below both sources*, heard as *"when
+the X knob is CW the internal sounds massively dominate"*.
+
+    mix    linear   equal-power
+    0.50    0.707       1.000     <- the dip
+
+`XfadeQ15` takes both legs out of the **existing sine table** — mix spans a
+quarter turn, so `mix << 15` is one leg's phase and `(32767 - mix) << 15` the
+other. Worst power deviation 0.0076%, no new table. Same economy as `HannQ15`.
+
+## Crest factor: why the live path still sounds softer, and must
+
+**Not a fault, and not to be "fixed".** Measured crest (peak/rms):
+
+    synth  1.75 – 1.91        independent oscillators, peaks rarely coincide
+    live   2.74 – 3.87        correlated copies, peaks line up
+
+The rail limits *peak*; loudness follows *rms*. At matched peak the live path
+carries ~6 dB less rms, so it reads quieter than its level suggests. Raising
+its gain to match by ear would clip it — at N=11 it already has only 2.9 dB of
+peak headroom against the synth's 7.7.
+
+`shepsim.py::check_live_levels` pins all three of the above.
+
+## The seam detector's third correction: a maximum must be UNIQUE
+
+The seam measure was condemning **N=3 at a flat 1.0000**, identical to the
+deliberately-broken control. It was a false positive, and it had been in the
+committed tree.
+
+At low layer counts the signal is a few low sines, so the largest
+sample-to-sample jump in the whole render is **5 LSB** — the quantisation
+floor — and thousands of samples tie at it. Whether one of those ties lands
+inside the seam guard is then luck.
+
+    real build N=3   max jump  5, shared by 11,183 samples  (1.456%)
+    broken control   max jump  7, shared by     28 samples  (0.004%)
+
+A genuine discontinuity is a large jump that **stands alone**. The tie fraction
+separates the two cases by a factor of 350, so a maximum shared by more than
+0.5% of samples now yields *"no unique jump"* — inconclusive — rather than a
+verdict.
+
+This is the **third** measure in that file to fail the same way: a ratio only
+separates signal from noise when its denominator *is* the signal. Level
+periodicity and HF splatter were both retired for it earlier.
+
 ## Test discipline
 
 **If you change a DSP file, run the matching test.** They take seconds.
@@ -1022,7 +1151,8 @@ beating between three widely spaced oscillators — the phase-folded profile
 is scattered, not dipped at any consistent phase. A detector built on it
 condemns a perfectly good card.
 
-Two things follow, and both are now in the code:
+Three things follow, and all are now in the code. The third was added later,
+after the same failure recurred a third time — see finding 26:
 
 1. **The verdict rests on seam step alone** — the largest sample-to-sample
    jump near a wrap boundary, over the largest jump anywhere. A real
@@ -1031,27 +1161,53 @@ Two things follow, and both are now in the code:
    purpose first and confirms the measure responds, because a detector that
    never fires is indistinguishable from one that cannot fire. If the
    control fails to separate, it says so and withholds the verdict.
+3. **The maximum must be UNIQUE for the ratio to mean anything.** At low layer
+   counts the largest jump in the whole render is the quantisation floor, tied
+   by thousands of samples, so the ratio measures luck. A maximum shared by
+   more than 0.5% of samples now yields "no unique jump" — inconclusive —
+   rather than a verdict.
 
-Current result: control 1.00, real build 0.44–0.96 at every layer count.
-No wrap discontinuity. **Expect audible gentle beating at N=3 regardless** —
-that is three oscillators, not a defect.
+Current result:
+
+        N   seam step    max    ties   verdict
+        3      1.0000      5   11183   no unique jump   (quantisation floor)
+        4      0.4444      9     704   seamless
+        6      0.7917     24     580   seamless
+        8      0.9412     68      32   seamless
+       11      0.9379    322       8   seamless
+     control   1.0000      7      28   fires correctly
+
+No wrap discontinuity where the measure can see one. N=3 is genuinely
+undecidable this way — the signal has no jump large enough to compare against —
+so that case rests on listening, and it has been listened to.
+**Expect audible gentle beating at N=3 regardless** — that is three
+oscillators, not a defect.
 
 ## Still to do
 
-**`docs/BRINGUP.md` is the ordered first hardware session** — each step depends
-only on what is already confirmed, so a failure localises to what was just
-added. Read CV Out 2 *before* judging the sound: an overrunning ISR produces
-artefacts that look like DSP bugs and chasing those first wastes the session.
+Everything below has been played on hardware across several sessions; what
+remains is confirmation of the most recent changes and the release chores.
 
-- **Flash it and listen.** Nothing here has been heard.
-- Confirm the octave wrap is genuinely inaudible at low layer counts.
-- Check CV Out 2 for the real DSP load. The estimate was ~22% raw / ~45–50%
-  compiled, but SPECTRAL was modelled at 51% and ran at 231%, so the meter is
-  the authority.
-- Confirm L/R sum to mono without cancellation on hardware (host test says
-  −0.22 dB worst).
-- Listen for aliasing at 12 layers — the top layer sits near 28 kHz, silenced
-  only by the window.
+**`docs/BRINGUP.md` is the ordered first hardware session.** It predates most
+of these findings and its CV Out 2 steps no longer apply — that meter was
+removed once it had served its purpose.
+
+**Unconfirmed on hardware — the level work of this session:**
+
+- The live path against the synth at every layer count. Host says 357–389
+  against 443, spread 0.8 dB. Listen for whether the *loudness* now matches;
+  the crest-factor gap means it will still read slightly softer, and that is
+  expected rather than a fault to chase further.
+- The Y crossfade at the midpoint, which gained 3.6 dB. It should no longer
+  dip in the middle of the sweep.
+- Whether the synth still dominates with X clockwise. If it does after this,
+  the remaining cause is spectral rather than level — the oscillators keep
+  energy up high where the octave stack has rolled off — and the fix would be
+  a gentle tilt on the live path, not more gain.
+
+**Release chores:**
+
 - `panels/` is empty — no panel art yet.
 - `UF2/` is empty — populate on first release, and flip `info.yaml` to
-  `draft: false` / `Status: Released` only after hardware testing.
+  `draft: false` / `Status: Released` once the above is confirmed.
+- `docs/BRINGUP.md` wants a pass to drop the CV Out 2 steps.

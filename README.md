@@ -38,7 +38,7 @@ siren rather than the illusion.
 
 The card does this two ways at once, and Y crossfades between them:
 
-- **Internal voice** — a bank of 3 to 12 sine oscillators.
+- **Internal voice** — a bank of 3 to 11 sine oscillators.
 - **Live audio** — your signal, octave-stacked: every partial transposed into
   the same octave-spaced layers as the oscillators, gliding forever through
   the same window.
@@ -55,6 +55,19 @@ rather than as pitch.
 **What works poorly:** a solo melodic line. The shifter is inharmonic (see
 below), so a recognisable tune comes back as a recognisable tune that has been
 bent out of shape, which is usually not what is wanted.
+
+**On levels.** The two sources are matched to within about 2 dB at every layer
+count, and Y crossfades between them at constant power, so neither the density
+knob nor the middle of the Y sweep should change how loud the card is.
+
+The live path will still read as slightly softer than the internal voice even
+so, and that is inherent rather than a mis-setting. The oscillators are
+independent, so their peaks rarely coincide; the octave stack is the same
+signal transposed, so its peaks line up. At matched peak level — which is what
+the output rail actually limits — the live path therefore carries roughly 6 dB
+less average energy, and loudness follows the average. Driving it harder to
+match by ear would simply clip it. If you want the live path louder, feed it a
+hotter or more compressed source.
 
 ## Controls
 
@@ -297,10 +310,10 @@ check re-implements the integer algorithm and asserts against a reference:
 |---|---|
 | `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, Nyquist, illusion continuity |
 | `tools/quant_check.py` | scale tables, the octave wrap, portamento direction, stepping |
-| `tools/hilbert_check.py` | allpass transfer function, quadrature, sideband rejection, both coefficient traps |
 | `tools/ping_check.py` | pitch frozen after a strike, envelope range, voice stealing, polyphonic headroom, knob-collision and trigger-freeze wiring |
 | `tools/octave_check.py` | transposition ratio, crossfade sum, recycle rates, head rotation at the wrap |
 | `tools/passthru_check.py` | **end-to-end gain — the authority on scaling** |
+| `tools/shepsim.py` | renders WAVs; the wrap-seam analysis and the live-path level check |
 
 Two of these found real bugs during development. `shepard_check.py` caught a
 truncated window lookup that rippled 0.48% at odd layer counts while testing
