@@ -110,7 +110,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twenty-six findings, four of them my own changes making things worse
+## Found on HARDWARE — twenty-seven findings, four of them my own changes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -742,6 +742,11 @@ SEALED silencing the live input is coherent there too. Only the GATE was wrong.
 `ping_check.py::check_trigger_does_not_freeze` asserts both halves — that the
 gate is mode-conditional, and that the switch freeze path is untouched.
 
+**Superseded by finding 27.** Making the gate mode-conditional fixed PING but
+left normal boot with the same jack doing both jobs, so stepping the scale
+still stopped the glide. HOLD has since moved to Audio In 2 and Pulse In 1 is
+now an event jack in both modes; that test asserts the stronger invariant.
+
 **Second source-level bug in a row**, after the knob collision. Both were
 invisible to every numeric test because the DSP was correct in each case; what
 was wrong was which control fed what. Worth remembering when a card gains a
@@ -871,6 +876,55 @@ otherwise it reports *"no unique jump"* rather than a defect.
 **This is the third measure in that file to fail this exact way.** Level
 periodicity and HF splatter were retired earlier for the same reason: a ratio
 only separates signal from noise when its denominator IS the signal.
+
+### 27. HOLD moved to Audio In 2 — one jack cannot be a gate AND an event
+
+The README claimed *"Glide and stepping work together: park Main at centre for
+pure manual stepping, or leave it off-centre and the pulses nudge an
+already-moving glide."* Reported as a good idea that **isn't true**, and it
+wasn't: stepping worked, but the second half could not, because Pulse In 1 was
+BOTH the step trigger and the freeze gate.
+
+The rising edge advanced a degree; the gate then pinned the pole for as long as
+it stayed high. So stepping an already-moving glide necessarily stopped it. The
+two meanings were in direct conflict and no amount of tuning could reconcile
+them — **a gate and an event are different gestures.**
+
+HOLD now lives on **Audio In 2**, which was the card's one unused jack. That is
+the right home for it structurally: a hold is a STATE, and a level input is
+where states belong. Pulse In 1 is left meaning exactly one thing per mode —
+step in normal boot, strike in HIDDEN BARBER.
+
+**Two things it needed:**
+
+1. **A Schmitt trigger.** Audio In 2 is a bipolar AUDIO input with no
+   comparator in front of it, so a single threshold chatters on any slow edge —
+   and chatter on a hold reads as the pole stuttering rather than stopping.
+   `kHoldEngage` 400 / `kHoldRelease` 200 (about 1.2 V and 0.6 V of a 6 V full
+   scale) puts the hysteresis at half the engage level. An unpatched jack reads
+   exactly 0, because ComputerCard zeroes disconnected inputs, so the default is
+   "not held".
+
+2. **Stopping the trigger stepping the scale in PING.** Found while making the
+   change, and it would have become audible immediately: `if (triggered)` ran
+   `StepScale` in both modes, so in HIDDEN BARBER every strike also kicked the
+   pole a degree. Repeated triggers would have walked up the scale rather than
+   sampling wherever the pole had drifted to — which is the entire idea of the
+   mode. **It was latent only because the gate used to freeze the pole for its
+   own duration and hid the jump.** Now `!ping_mode_ && scale_ != kScaleSmooth`.
+
+That second point is the general shape: **removing a bug can expose one that
+was hiding behind it.** The freeze was masking the step, so fixing the freeze
+made the step audible for the first time.
+
+**This is the third "one control, two meanings" fault on this card**, after the
+decay/quantise knob collision (finding 20) and the trigger/freeze collision
+(finding 21). All three were invisible to every numeric test because the DSP
+was correct in each case; what was wrong was the WIRING.
+`ping_check.py::check_trigger_does_not_freeze` now asserts the stronger
+invariant — that Pulse In 1 does not reach `gate_freeze_` at all, in either
+mode — plus the hysteresis and the PING step exclusion. Verified to fail on
+both regressions.
 
 ## The invariant everything depends on
 

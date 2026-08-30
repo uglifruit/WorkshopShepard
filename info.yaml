@@ -63,10 +63,14 @@ summary: |
   Snapping is slewed over about 1.4 ms rather than jumped, because twelve
   oscillators stepping together is audible as a thump.<br><br>
 
-  Switch Down is spring-loaded and toggles FREEZE on each press. Pulse In 1
-  freezes from a gate and resumes from exactly where it paused - the glide does
-  not run on underneath - and its rising edge advances a scale step in the
-  stepped modes. Pulse In 2 reverses the glide while held. CV In 1 and 2 offset
+  Switch Down is spring-loaded and toggles FREEZE on each press. Audio In 2 is
+  a HOLD gate doing the same thing - it stops the glide while high and resumes
+  from exactly where it paused, so the glide does not run on underneath. Pulse
+  In 1 is an EVENT rather than a gate: its rising edge advances a scale step in
+  the stepped modes, and because it never holds the glide, stepping and gliding
+  work together - park Main at centre for pure manual stepping, or leave it
+  off-centre and the pulses nudge an already-moving pole. Pulse In 2 reverses
+  the glide while held. CV In 1 and 2 offset
   speed and density. CV Out 1 is the master phase as a 0-1V ramp - one octave per cycle,
   so an oscillator tracks the pole in tune - and CV Out 2 is the window level
   at that phase, so the two together drive a VCA and oscillator as one Shepard
@@ -119,9 +123,20 @@ panel:
       name: In
       type: audio
       description: >
-        Source for the octave stack, and for PING's gated voice. Wants clear
-        pitch content - a voice, a synth line, a drone, a chord. Percussion
-        works but smears, since each read head spans a 341 ms window.
+        Source for the octave stack, and for HIDDEN BARBER's gated voice.
+        Wants clear pitch content - a voice, a synth line, a drone, a chord.
+        Percussion works but smears, since each read head spans a 341 ms
+        window.
+    - id: AudioIn2
+      name: Hold
+      type: audio
+      description: >
+        HOLD while high - stops the glide and resumes from exactly where it
+        paused, so releasing never jumps ahead. Works in both modes; in HIDDEN
+        BARBER it holds the invisible pole still, so every strike gives the
+        same chord. Above about 1.2 V holds and below 0.6 V releases, with
+        hysteresis between them because this is an audio input rather than a
+        comparator. Unpatched it does nothing.
     - id: CVIn1
       name: Speed
       type: cv
@@ -133,13 +148,13 @@ panel:
       type: cv
       description: Bipolar density offset, summed with the X knob on page one.
     - id: PulseIn1
-      name: Freeze
+      name: Step
       type: pulse
       description: >
-        In normal boot: holds the stack while high and resumes from exactly
-        where it paused, so releasing never jumps ahead; its rising edge also
-        advances one scale degree in the stepped modes. In HIDDEN BARBER: the
-        strike trigger, which does not freeze the pole.
+        An EVENT, never a gate - it does not hold the glide, which is what
+        lets stepping and gliding be used together. In normal boot its rising
+        edge advances one scale degree in the stepped modes, so the pole keeps
+        climbing between steps. In HIDDEN BARBER it is the strike trigger.
     - id: PulseIn2
       name: Reverse
       type: pulse

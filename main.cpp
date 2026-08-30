@@ -97,6 +97,24 @@ static constexpr int32_t kDeadzone = 50;
 // inside a deliberate nudge.
 static constexpr int32_t kPickupBand = 1200;
 
+// HOLD thresholds for Audio In 2, as a Schmitt trigger.
+//
+// Audio In 2 is a bipolar AUDIO input reading +-2048 over roughly +-6 V, with
+// no comparator in front of it. A single threshold would chatter on any slow
+// edge, and chatter on a hold reads as the pole stuttering rather than
+// stopping - so two thresholds, with a gap far wider than any plausible noise.
+//
+//     engage   400 of 2048  ~1.2 V
+//     release  200 of 2048  ~0.6 V
+//
+// The hysteresis is half the engage level, not a handful of LSB. Any real gate
+// (5 V, or a 0/8 V envelope) crosses both cleanly; audio-level noise crosses
+// neither. An unpatched jack reads exactly 0, because ComputerCard zeroes
+// disconnected inputs - so "not held" is the default, which is the safe way
+// round.
+static constexpr int32_t kHoldEngage = 400;
+static constexpr int32_t kHoldRelease = 200;
+
 // Glide rate curve coefficients - see the derivation in UpdateControl().
 //
 //     rate_q32 = |defl| * kRateLinear + defl^7 * kRateHigh
@@ -626,11 +644,19 @@ class ShepardCard : public ComputerCard {
     // Pulse In 1 advances one degree in stepped modes. Counted, not flagged -
     // a bool set by the ISR and cleared elsewhere loses any trigger arriving
     // between the read and the clear.
+    //
+    // NOT in PING, where the same jack is the strike trigger and the pole must
+    // be left alone. Stepping there would move the pitch on every strike, so
+    // a repeated trigger would walk up the scale instead of sampling wherever
+    // the pole has drifted to - which is the whole idea of the mode.
+    //
+    // This was latent rather than audible until HOLD moved to Audio In 2: the
+    // gate used to freeze the pole for its own duration, which hid the jump.
     const uint32_t tc = trigger_count_;
     const bool triggered = (tc != trigger_seen_);
     if (triggered) {
       trigger_seen_ = tc;
-      if (scale_ != kScaleSmooth) {
+      if (!ping_mode_ && scale_ != kScaleSmooth) {
         master_free_q32_ = StepScale(master_free_q32_, scale_,
                                      shift_up_ ? 1 : -1);
       }
@@ -903,29 +929,51 @@ class ShepardCard : public ComputerCard {
     // is what makes it playable against a clock.
     reverse_ = PulseIn2();
 
-    // Pulse In 1 FREEZES while held, and resumes FROM WHERE IT STOPPED.
-    // The free-running phase is pinned during the gate (see UpdateControl), so
-    // releasing continues from exactly where it paused rather than jumping to
-    // wherever an underlying phase had reached.
+    // Pulse In 1 is an EVENT jack: a strike in PING, a scale step in normal
+    // boot. It no longer freezes anything.
+    //
+    // It used to do both, and the two meanings fought each other. The rising
+    // edge advanced a degree and the gate then pinned the pole for as long as
+    // it stayed high, so "step the scale while the glide runs underneath" -
+    // which is the interesting combination, and which the README claimed -
+    // could not actually happen: the glide stopped the moment you stepped it.
+    //
+    // HOLD now lives on Audio In 2, which was previously unused. A hold is a
+    // STATE, not an event, so a level input is the honest home for it, and it
+    // leaves Pulse In 1 free to mean one thing in each mode.
     const bool pulse1 = PulseIn1();
     if (pulse1 && !last_pulse1_) ++trigger_count_;
     last_pulse1_ = pulse1;
 
-    // Pulse In 1 freezes the stack while high in NORMAL boot - but NOT in
-    // PING, where the same jack is the strike trigger.
+    // HOLD from Audio In 2, with a Schmitt trigger.
     //
-    // Without this exception the pulse that voices a ping also stops the pole
-    // climbing, so the pole is frozen for as long as the gate is high. That
-    // read on hardware as "the background climb isn't happening when the note
-    // is ringing" - and it appeared to depend on the DECAY setting, because a
-    // longer decay means retriggering sooner, which means the gate is high a
-    // greater fraction of the time. The decay knob was innocent; the gate was
-    // holding the pole.
+    // This is an AUDIO input, not a pulse input: it reads bipolar +-2048 with
+    // no comparator in front of it, so a single threshold would chatter on any
+    // slow edge - and chatter here means the pole stutters instead of holding.
+    // Two thresholds with a wide gap between them cost one compare and remove
+    // the problem entirely.
     //
-    // In PING the pole must climb unconditionally. That is the entire idea:
-    // an invisible barber's pole running underneath, sampled wherever it has
-    // reached at each strike.
-    gate_freeze_ = ping_mode_ ? false : pulse1;
+    // ~1.2 V to engage, ~0.6 V to release, against a 6 V full scale. Well
+    // above any plausible audio-level noise, well below a 5 V gate, and the
+    // hysteresis is half the engage level rather than a few LSB.
+    //
+    // An UNPATCHED jack reads exactly 0 - ComputerCard zeroes disconnected
+    // inputs - so the default is "not held", which is the safe way round.
+    const int32_t hold_in = AudioIn2();
+    if (hold_ext_) {
+      if (hold_in < kHoldRelease) hold_ext_ = false;
+    } else {
+      if (hold_in > kHoldEngage) hold_ext_ = true;
+    }
+
+    // HOLD applies in BOTH modes, and that is deliberate.
+    //
+    // In normal boot it stops the glide. In PING it holds the invisible pole
+    // still, so every strike gives the SAME chord until it is released - which
+    // is a real performance control, and the switch-latched freeze already
+    // worked that way. What was wrong before was never that PING could be
+    // frozen; it was that the STRIKE TRIGGER froze it as a side effect.
+    gate_freeze_ = hold_ext_;
 
     freeze_ = freeze_latch_ || gate_freeze_;
 
@@ -1081,6 +1129,7 @@ class ShepardCard : public ComputerCard {
 
   bool freeze_ = false;
   bool gate_freeze_ = false;
+  bool hold_ext_ = false;      // Schmitt state for the Audio In 2 hold
   bool reverse_ = false;
   bool freeze_latch_ = false;
   uint32_t trigger_count_ = 0;

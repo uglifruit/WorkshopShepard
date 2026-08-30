@@ -158,16 +158,25 @@ granular shifter; compensating for it measurably wrecks the downshifts
 
 ---
 
-## 6. Freeze, and the switch
+## 6. Freeze and HOLD
 
 - **Short press Down** — the stack stops moving but keeps sounding. LED 3
   steady. **Press again** — resumes.
 - **Press several times quickly** — must toggle reliably every time. If it
   works only sometimes the debounce has failed: contact bounce toggling an even
   number of times leaves it off.
-- **Gate into Pulse In 1** — freezes while high, and resumes from exactly where
+- **Gate into Audio In 2** — holds while high, and resumes from exactly where
   it paused rather than jumping ahead.
 - **Gate into Pulse In 2** — reverses direction while held.
+
+**HOLD moved here from Pulse In 1**, which now only ever steps or strikes. Two
+things to check, because Audio In 2 is an audio input rather than a comparator:
+
+- **A slow edge must not chatter.** Feed it a slow envelope or an LFO rather
+  than a square gate. The pole should stop once, cleanly, not stutter around
+  the threshold. There is 0.6 V of hysteresis for this.
+- **Unpatched, it must do nothing.** ComputerCard zeroes a disconnected input,
+  so with nothing in that jack the glide should never hold.
 
 ---
 
@@ -205,7 +214,11 @@ Each pulse advances exactly one scale degree. No skipped or double steps — the
 trigger is counted rather than flagged specifically so a pulse arriving at an
 awkward moment is not lost.
 
-Then move Main off centre: the glide should run *and* pulses should nudge it.
+**Then move Main off centre: the glide should run AND the pulses should nudge
+it.** This is the combination that could not work while Pulse In 1 also froze
+the glide — the step arrived and the gate then pinned the pole for its whole
+duration, so the pole never climbed between steps. If the glide stalls while a
+gate is high, HOLD has found its way back onto this jack.
 
 ---
 
@@ -234,7 +247,9 @@ pitches it has reached, and that ping decays *without climbing*.
 |---|---|
 | Single trigger | a struck, decaying chord of octaves — not a click, not a drone |
 | Repeated triggers | each lands at a *different* pitch, building a chord |
-| Hold the gate high | the pole keeps climbing underneath (finding 21 — it used to freeze) |
+| Hold the trigger high | the pole keeps climbing underneath (finding 21 — it used to freeze) |
+| Repeated triggers, stepped scale | the pitch must drift with the POLE, not walk up a degree per strike — the trigger steps the scale in normal boot only |
+| Gate into Audio In 2 | the pole holds, so every strike gives the SAME chord until released |
 | Page 2 Main (quantise) | changes the scale, and **must not change the decay** |
 | Page 2 X (decay) | 17 ms click to a 1.7 s ring, and **must not change the pitch** (finding 20 — one knob once drove both) |
 

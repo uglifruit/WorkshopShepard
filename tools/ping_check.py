@@ -370,21 +370,30 @@ def check_no_knob_collision():
 
 
 def check_trigger_does_not_freeze():
-    """In PING, the strike trigger must NOT also freeze the pole.
+    """Pulse In 1 must be an EVENT jack only - it must not freeze anything.
 
-    THE BUG THIS EXISTS FOR. Pulse In 1 is the freeze GATE in normal boot and
-    the strike TRIGGER in PING - and both behaviours were wired to it, so the
-    same pulse that voiced a ping also stopped the pole climbing.
+    THE BUG THIS EXISTS FOR, IN TWO ROUNDS.
 
-    It presented as depending on the DECAY knob, because a longer decay means
-    retriggering sooner, which means the gate is high a greater fraction of
-    the time. The decay was innocent. Reported as "the background climb ISN'T
-    happening when the note is ringing".
+    Round one: Pulse In 1 was the freeze GATE in normal boot and the strike
+    TRIGGER in PING, and both behaviours were wired to it - so the same pulse
+    that voiced a ping also stopped the pole climbing. It presented as
+    depending on the DECAY knob, because a longer decay means retriggering
+    sooner, which means the gate is high a greater fraction of the time. The
+    decay was innocent. Reported as "the background climb ISN'T happening when
+    the note is ringing". Fixed by gating on ping_mode_.
+
+    Round two: that fix left normal boot still freezing on the same jack that
+    steps the scale, so "step the scale while the glide runs underneath" was
+    impossible - the glide stopped for the duration of every gate. HOLD moved
+    to Audio In 2, which is a level input and the honest home for a state.
+
+    So the invariant is now stronger than "not in PING": Pulse In 1 must not
+    reach gate_freeze_ AT ALL, in either mode.
 
     A source check, like the knob-collision one: the fault is in the wiring,
     not in any number.
     """
-    print("  the strike trigger does not freeze the pole:")
+    print("  Pulse In 1 is an event jack, not a gate:")
     import os
 
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -403,20 +412,41 @@ def check_trigger_does_not_freeze():
     src = "".join(body)
 
     ok = True
-    if "gate_freeze_ = pulse1;" in src:
+
+    # gate_freeze_ must come from the Audio In 2 hold, and NOTHING else.
+    if "gate_freeze_ = hold_ext_;" in src:
+        print("    gate_freeze_ takes the Audio In 2 hold  ok")
+    elif "pulse1" in src.split("gate_freeze_ =")[1].split(";")[0]:
         ok = False
-        print("    gate_freeze_ takes pulse1 unconditionally  FAIL")
-        print("    (in PING that freezes the pole on every strike)")
-    elif "gate_freeze_ = ping_mode_ ? false : pulse1;" in src:
-        print("    gated on ping_mode_ - pole climbs unconditionally  ok")
+        print("    gate_freeze_ still reads pulse1  FAIL")
+        print("    (Pulse In 1 must not freeze - HOLD lives on Audio In 2)")
     else:
         ok = False
         print("    gate_freeze_ assignment not recognised  FAIL")
 
-    # The switch-latched freeze SHOULD still work in PING: holding the pole
-    # still so every strike gives the same chord is a real control.
+    # The hold must be a Schmitt trigger. Audio In 2 is an AUDIO input with no
+    # comparator in front of it, so a single threshold chatters on a slow edge
+    # and the pole stutters instead of holding.
+    if "kHoldEngage" in src and "kHoldRelease" in src:
+        print("    hold is hysteretic (engage/release differ)  ok")
+    else:
+        ok = False
+        print("    hold has no hysteresis - will chatter on a slow edge  FAIL")
+
+    # In PING the trigger must NOT step the scale. It arms a strike, and the
+    # pole is left alone - otherwise repeated triggers walk up the scale
+    # instead of sampling wherever the pole has drifted to.
+    if "if (!ping_mode_ && scale_ != kScaleSmooth)" in src:
+        print("    trigger does not step the scale in PING  ok")
+    else:
+        ok = False
+        print("    trigger may step the scale in PING  FAIL")
+        print("    (every strike would kick the pitch a degree)")
+
+    # The switch-latched freeze SHOULD still work in both modes: holding the
+    # pole still so every strike gives the same chord is a real control.
     if "freeze_ = freeze_latch_ || gate_freeze_;" in src:
-        print("    switch freeze still active in PING  ok")
+        print("    switch freeze still active in both modes  ok")
     else:
         ok = False
         print("    switch freeze path changed unexpectedly  FAIL")

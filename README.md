@@ -6,16 +6,6 @@ a pitch that rises or falls forever without ever leaving its range.
 Named for the illusion it borrows from: a striped pole turning on its axis,
 where every stripe travels upward and none of them ever arrives.
 
-> ## ⚠️ DRAFT — on hardware, still being shaken out
->
-> The card has been flashed and played. Several rounds of listening have found
-> and fixed real bugs — a click at the loop, a silent page, a too-quiet blend,
-> a glide running 32× slow — but it is **not finished**, and the fixes from the
-> most recent round have not themselves been heard yet.
->
-> There is no released binary yet. See [docs/BRINGUP.md](docs/BRINGUP.md) for
-> the ordered hardware session.
-
 ## What it does
 
 A Shepard–Risset tone is a stack of components spaced exactly one octave apart,
@@ -32,17 +22,10 @@ The speed range is deliberately wide, and weighted heavily toward the slow end:
 about 46 seconds per octave just off centre, roughly a second per octave at
 85% of the travel, and up to eight octaves per second at the stops.
 
-That weighting is not arbitrary. **A Shepard tone only works while you cannot
-track the octave cycle** — above about one octave per second the cycle repeats
-often enough to hear, and it stops sounding like an endless rise and starts
-sounding like a climbing line played over and over. So most of the knob lives
-below that threshold, and the last stretch is there for when you want the
-siren rather than the illusion.
-
 The card does this two ways at once, and Y crossfades between them:
 
-- **Internal voice** — a bank of 3 to 11 sine oscillators.
-- **Live audio** — your signal, octave-stacked: every partial transposed into
+- **Internal voice** - a bank of 3 to 11 sine oscillators.
+- **Live audio** - incoming audio, octave-stacked: band-passed with every partial transposed into
   the same octave-spaced layers as the oscillators, gliding forever through
   the same window.
 
@@ -55,48 +38,29 @@ The live path wants **sustained, harmonically rich** material — pads, drones,
 noise, cymbals, feedback, a whole mix. Percussion works but reads as texture
 rather than as pitch.
 
-**What works poorly:** a solo melodic line. The shifter is inharmonic (see
-below), so a recognisable tune comes back as a recognisable tune that has been
-bent out of shape, which is usually not what is wanted.
-
-**On levels.** The two sources are matched to within about 2 dB at every layer
-count, and Y crossfades between them at constant power, so neither the density
-knob nor the middle of the Y sweep should change how loud the card is.
-
-The live path will still read as slightly softer than the internal voice even
-so, and that is inherent rather than a mis-setting. The oscillators are
-independent, so their peaks rarely coincide; the octave stack is the same
-signal transposed, so its peaks line up. At matched peak level — which is what
-the output rail actually limits — the live path therefore carries roughly 6 dB
-less average energy, and loudness follows the average. Driving it harder to
-match by ear would simply clip it. If you want the live path louder, feed it a
-hotter or more compressed source.
-
 ## Controls
 
 The switch's two stable positions select knob pages. Down is spring-loaded and
 is a button, not a third page.
 
 **Knobs use pickup across a page change.** Arriving on a page, each knob holds
-its previous value until you move it — otherwise every page flick would edit
-three parameters at once. While a knob is waiting its LED pulses (left to
-right: Main, X, Y), so you can see which ones are still to be picked up.
+its previous value until you move it.  While a knob is waiting its LED pulses (0=Main, 1=X, 2=Y), so you can see which ones are still to be picked up.
 
 ### Switch MIDDLE — page 1
 
 | Knob | Function |
 |---|---|
-| **Main** | **Speed and direction.** Centre is stationary, with a deadzone so it can be found by feel. Anticlockwise descends, clockwise ascends. About 85% of the travel sits inside the illusion (46 s down to 1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
-| **X** | **Density** — 3 to 11 octave layers, stepped discretely with hysteresis. Adding a layer respaces the whole stack, so the change is audible by nature; the output level is slewed across it rather than stepping too. Summed with CV In 2. |
-| **Y** | **Source** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. The shifter works with Main parked at noon: it is an effect on the input, not a function of movement. |
+| **Main** | **Speed and direction.** Centre is stationary. Anticlockwise descends, clockwise ascends. About 80% of the travel sits inside the illusion (46 s down to ~1 s per octave); the last stretch runs out to a deliberate siren at 0.13 s. Summed with CV In 1. |
+| **X** | **Density** - 3 to 11 octave layers, stepped discretely with hysteresis. Adding a layer respaces the whole stack, so the change is audible by nature. Summed with CV In 2. |
+| **Y** | **Source Mix** — fully anticlockwise is the internal voice, fully clockwise is the live-audio shifter, anywhere between is a blend. |
 
 ### Switch UP — page 2
 
 | Knob | Function |
 |---|---|
-| **Main** | **Quantise** — see the scale table below. |
-| **X** | **Stereo width** — deliberately subtle. It shifts the window slightly between channels, which spreads the image without ever separating an octave from its neighbours. Wider schemes were tried and they break the illusion: panning octaves apart tells the ear they are separate sources, and the stack stops fusing into one endless rise. |
-| **Y** | **Output level.** Holds its current value until actually moved, so changing page never drops the volume. |
+| **Main** | **Quantise** - see the scale table below. |
+| **X** | **Stereo width** - Shifts the window slightly between channels, which subtly spreads the image. |
+| **Y** | **Output level.** Counter Clockwise = silent. |
 
 #### Scales
 
@@ -120,16 +84,10 @@ repeat *below* the octave — diminished every minor third, whole tone every
 whole tone — so the stack is already self-similar at a smaller interval than
 the wrap, and the climb has no home key to return to.
 
-**Steps are even in time.** The pole advances one degree per unit time rather
-than a fixed pitch interval, so every note holds equally long whatever its gap
-— without it a whole tone would take twice as long to cross as a semitone, and
-in major the notes either side of E–F and B–C would pass twice as quickly as
-the rest.
-
 ### Switch DOWN — momentary
 
 - **Short press** toggles **FREEZE**: the stack stops moving through the
-  envelope but keeps sounding. Pulse In 1 does the same from a gate, and
+  envelope but keeps sounding. **Audio In 2** does the same from a gate, and
   resumes from exactly where it paused rather than jumping ahead.
 - LED 3 lights while frozen; press again to resume.
 
@@ -138,9 +96,10 @@ the rest.
 | Jack | Function |
 |---|---|
 | Audio In 1 | Source for the octave stack, in both modes |
+| Audio In 2 | **HOLD while high** — stops the glide and resumes from exactly where it paused. Above about 1.2 V holds, below 0.6 V releases; unpatched it does nothing |
 | CV In 1 | Bipolar speed offset, summed with Main |
 | CV In 2 | Bipolar density offset, summed with X |
-| Pulse In 1 | **Freeze while high** — resumes from where it stopped, and advances one scale degree on the rising edge in stepped modes |
+| Pulse In 1 | **Advances one scale degree** in stepped modes; the strike trigger in Hidden Barber. An event, not a gate — it never holds the glide |
 | Pulse In 2 | **Reverse direction while high** |
 | Audio Out 1 / 2 | Stereo output |
 | CV Out 1 | Master phase — a 0–1 V ramp, **one octave per cycle** on a V/oct input |
@@ -149,50 +108,24 @@ the rest.
 
 ## The octave stack
 
-The live path transposes whatever is patched into Audio In 1 into **N
-octave-spaced copies**, weighted by the same window as the oscillator bank. A
-220 Hz partial appears at 55, 110, 220 and 440 Hz — and each copy rises and
-fades exactly as an oscillator layer does.
-
-That is the point: the internal voice is octave-stacked sines, and this is
-octave-stacked *you*. Your source doesn't have an effect applied over it; it
-becomes the illusion.
-
-Feed it anything with clear pitch content — a voice, a synth line, a drone, a
-chord. Percussion works too but the transposed copies smear, since each read
-head spans a 341 ms window.
-
-**Grain length varies with the shift ratio**, and this is deliberate. The read
-window is a fixed span of the buffer, so a head playing at quarter speed
-produces grains four times longer in real time — descending lines audibly
-lengthen before being replaced by short high ones. Compensating for it gives
-uniform grains but wrecks the downshifts (the lowest layer drops to the point
-where artefacts are louder than the wanted octave), so quality wins. The
-barber's pole works macroscopically; an individual line shows its grain.
-
-Two earlier designs were tried and rejected, and the reason is the same for
-both: they treated the input as something to *process* while the structure
-moved past it. A **frequency shifter** moved every partial by the same hertz,
-breaking the harmonic series and making the source unrecognisable. A **rising
-comb filter** swept resonant bands across the input, so any given partial was
-only heard while a band happened to cross it — it came and went rather than
-participating in the glide.
+Feed the live audio stack anything with clear pitch content — a voice, a synth line, a drone, a chord. Percussion works too but the transposed copies smear, since each read head spans a 341 ms window.
 
 ## Stepped modes
 
-With Main on page 2 past its first quarter, the glide snaps to a scale. The
-transition is **slewed rather than snapped** — about 1.4 ms — because twelve
-oscillators jumping together is audible as a thump even though a pitch step is
-not itself a click.
+With Main on page 2 at anything other then fully counter clockwise, the glide snaps to a scale. The transition is **slewed rather than snapped** — about 1.4 ms.
 
 Pulse In 1 advances one degree. Glide and stepping work together: park Main at
 centre for pure manual stepping, or leave it off-centre and the pulses nudge an
-already-moving glide.
+already-moving glide — the pole keeps climbing between steps.
+
+That combination is why **hold lives on Audio In 2 rather than on Pulse In 1**.
+A gate and a step are different gestures, and one jack cannot be both: while
+Pulse In 1 also froze the glide, stepping it necessarily stopped it, so the
+interesting half of this never worked.
 
 **Pulse Out 1 fires once per octave wrap.** Self-patch it to Pulse In 1 and the
 card advances a scale step every time the stack completes a cycle; or use it to
-clock something else in time with the illusion. At a slow glide that is a pulse
-every few seconds, at full speed about eight per second.
+clock something else in time with the illusion.
 
 ## The CV outputs
 
@@ -203,7 +136,7 @@ card rather than scaled by hand.
 **CV Out 2** is the window level at that same phase — what the bottom layer of
 the stack is doing.
 
-Patch both together and you get one Shepard layer made external: send CV Out 1
+Patch both together and you get one Shepard tone layer made external: send CV Out 1
 to an oscillator's V/oct and CV Out 2 to a VCA, and it rises in pitch while
 swelling and fading, then the next cycle begins. Add more voices patched the
 same way and offset, and you can build the illusion outside the card.
@@ -213,25 +146,24 @@ same way and offset, and you can build the illusion outside the card.
 **Hold the switch DOWN at power-on.**
 
 The pole keeps climbing — but silently, which is where the name comes from:
-the barber is still there, still turning, and you only see him when you strike
-him. A trigger on Pulse In 1 voices a **ping** at whatever pitches the pole has
-reached, and that ping decays *without climbing*, because it is a snapshot
-rather than a window onto the moving stack.
+the pole is still there, still turning, but you only see him when you strike
+hit. A trigger on Pulse In 1 voices a **ping** at whatever pitches the pole has
+reached.
 
-So the illusion runs the whole time and you only hear where it happens to be
-at the moments you strike it. Trigger repeatedly and each ping comes from a
-different point on the pole, building a chord out of one silently-rising
-structure. Because the pole wraps every octave, the pitches available are
-endless but bounded — the pole becomes something you play rather than something
-you listen to.
+Trigger repeatedly and each ping comes from a different point on the pole, building a chord out of one silently-rising structure.
+
+**Hold the pole still** — a gate into Audio In 2, or a press of the Down switch
+— and every strike gives the *same* chord instead. That turns the mode from an
+arpeggio into a fixed voicing you can play, and releasing lets the pole carry
+on from where it stopped.
 
 ### Switch MIDDLE — page 1
 
 | Knob | Function |
 |---|---|
-| **Main** | **Pole speed** — how fast the invisible climb moves between strikes, and which way |
-| **X** | **Density** — 3 to 11 layers in each strike |
-| **Y** | **Source** — internal sines anticlockwise, your own input octave-stacked clockwise |
+| **Main** | **Pole speed** - how fast the invisible climb moves between strikes, and which way |
+| **X** | **Density** - 3 to 11 layers in each strike |
+| **Y** | **Source Mix** - internal sines anticlockwise, your own input octave-stacked clockwise |
 
 ### Switch UP — page 2
 
@@ -252,151 +184,20 @@ decay knob does nothing until you nudge X.
 Four voices, oldest stolen when all are busy, so the newest four strikes are
 always the ones sounding.
 
-> **A caveat about fast triggering.** Four voices, twelve layers each, with the
+> **A caveat about fast triggering.** Four voices, eleven layers each, with the
 > live input octave-stacked through all of them, is close to what an RP2040 can
 > do at 48 kHz. Trigger fast enough that all four voices are ringing at once —
 > especially with a long decay and Y clockwise — and the card will distort.
->
-> That is the processor running out of time, not a bug, and there is no setting
-> that makes it go away: it is the honest ceiling of the mode. If you hit it,
-> shorten the decay, turn X down to fewer layers, or trigger a little less
-> densely. Sparse playing has plenty of margin.
 
-**Patch Pulse Out 1 back into Pulse In 1** and the card strikes itself once per
-octave — a self-playing instrument whose pitch sequence never repeats within a
-cycle. Or drive Pulse In 1 from anything else to play it deliberately.
 
-Note that Pulse In 1 does **not** freeze the pole in this mode — it is the
-strike trigger here, and the pole keeps climbing underneath regardless of how
-fast you play. The Down switch still freezes it by hand, which holds the pole
-still so every strike gives the same chord.
 
-With Y clockwise the live input is **gated by the ping envelope and transposed
-to the struck pitches**, so your own signal is what rings — the pole's pitch
-appears in your source material rather than alongside it.
-
-Even LEDs (0/2/4) show a normal boot, odd LEDs (1/3/5) the alt-boot.
-
-## How it works
-
-Everything is fixed point. The RP2040 has no FPU, so a float multiply costs
-~360 ns against a 20.8 µs per-sample budget — a single float in the audio path
-is not a slow choice, it is a broken one. Floats appear only at startup, to
-fill the lookup tables.
-
-Two economies make a twelve-layer stereo bank affordable at 192 MHz:
-
-- **`inc[i] = inc0 << i`.** Because the layers are exactly an octave apart,
-  every layer's frequency increment is layer 0's shifted left by *i*. One
-  exponential lookup serves all twelve, and it runs at 1.5 kHz rather than
-  48 kHz because the master phase moves at only a few octaves per second.
-- **One Hilbert transform, twelve modulators.** The analytic signal depends
-  only on the input, not on how far it is shifted, so running twelve
-  transforms would cost twelve times as much for bit-identical results. They
-  also *must* share one, or the layers decorrelate and the illusion smears.
-
-The spectral envelope is `sin²(πu)`, which reuses the first half of the sine
-table rather than needing one of its own. Its sum across the layers is exactly
-N/2 for every layer count and every phase — the same constant-overlap property
-that makes a Hann window work at 50% overlap, and the reason the level does not
-pulse as layers cycle through.
-
-Unlike its sibling card SPECTRAL, all the DSP runs in the audio ISR. An
-additive bank has no frame structure to amortise, so a block renderer would
-add latency and a class of ring-buffer race conditions for no benefit.
-
-## Verification
-
-The fixed-point DSP is verified on the host before anything is flashed. Each
-check re-implements the integer algorithm and asserts against a reference:
-
-| Test | Covers |
-|---|---|
-| `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, Nyquist, illusion continuity |
-| `tools/quant_check.py` | scale tables, the octave wrap, portamento direction, stepping |
-| `tools/ping_check.py` | pitch frozen after a strike, envelope range, voice stealing, polyphonic headroom, knob-collision and trigger-freeze wiring |
-| `tools/octave_check.py` | transposition ratio, crossfade sum, recycle rates, head rotation at the wrap |
-| `tools/passthru_check.py` | **end-to-end gain — the authority on scaling** |
-| `tools/shepsim.py` | renders WAVs; the wrap-seam analysis and the live-path level check |
-
-Two of these found real bugs during development. `shepard_check.py` caught a
-truncated window lookup that rippled 0.48% at odd layer counts while testing
-clean at even ones; `passthru_check.py` caught output running 4 dB too hot,
-sitting in soft clip up to 10% of the time.
-
-### Hearing it before flashing
-
-`tools/shepsim.py` runs the same integer engine and writes WAVs, so the card
-can be listened to without hardware:
-
-```
-python tools/shepsim.py                  # the wrap-seam set
-python tools/shepsim.py --all            # every mode
-python tools/shepsim.py --analyse-only   # just the seam verdict, no files
-python tools/shepsim.py --spectrogram    # PNGs as well (needs matplotlib)
-```
-
-It also answers the card's make-or-break question objectively — *is the octave
-wrap detectable?* — by measuring the largest sample-to-sample jump near a wrap
-against the largest anywhere in the signal. The check **calibrates itself**:
-every run first breaks the window lookup on purpose and confirms the measure
-responds, because a detector that never fires looks exactly like one that
-cannot.
-
-Current verdict: control (broken) 1.00, real build 0.44–0.96 at every layer
-count. No wrap discontinuity.
-
-**Listen for** a click, a lurch, a level dip, or a moment where the pitch
-appears to reset rather than continue. `out_wrap_fast_N03.wav` glides an octave
-per second, so any seam becomes a 1 Hz rhythm — far easier to notice than a
-single event in a slow sweep. N=3 is the exposed case: fewest layers, least
-masking.
-
-**What is not a fault:** gentle beating at three layers. That is the sound of
-three widely spaced oscillators, and the analysis specifically distinguishes it
-from a wrap artefact.
-
-## Building
-
-```
-cmake -G Ninja -B build -S .
-ninja -C build
-```
-
-Then hold BOOTSEL and drag `FLASHME/shepard.uf2` onto the Pico. Every build
-refreshes that copy, so it always matches the source you just compiled.
-
-`UF2/` is for released binaries and is populated deliberately, not by the
-build — it is empty until the card has been tested on hardware.
-
-## Status
-
-**Played on hardware across several sessions**, which is where most of what is
-written above comes from. Twenty-six distinct faults were found by listening
-and fixed — among them a click at every octave wrap, a glide running 32× slow,
-two live-input designs rejected by ear before the third worked, and a level
-mismatch between the two sources.
-
-What has *not* been confirmed by ear is the most recent round: the source
-levels now match to within about 2 dB at every layer count, and the Y crossfade
-holds constant power through the middle. Both measure correctly on the host.
-
-`docs/BRINGUP.md` is an ordered first session with the card. It predates most
-of those findings, and its CV Out 2 steps no longer apply — that diagnostic
-meter was removed once it had served its purpose.
+Even LEDs (0/2/4) indicate a normal boot, odd LEDs (1/3/5) the alt-boot.
 
 ## Credits
-
-Built on Chris Johnson's header-only
-[ComputerCard](https://github.com/TomWhitwell/Workshop_Computer) library for
-the Music Thing Modular Workshop System.
 
 The name is the visual illusion the sound is usually compared to. The tone
 itself is Roger Shepard's (1964); the continuous glissando form is
 Jean-Claude Risset's.
-
-Sibling card to [WorkshopSpectral](https://github.com/uglifruit/WorkshopSpectral),
-whose `MulQ15`, soft clippers and boot/paging logic are reused here.
 
 ## License
 
