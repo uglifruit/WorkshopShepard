@@ -27,10 +27,10 @@ deliberately left alone**, and the reason matters if you are tempted to
 So: **product names in `README.md`, `info.yaml` and `docs/`; mechanism names in
 the source.** The repository is still `WorkshopShepard` and that is fine.
 
-## Current status: v1.0.0, RELEASED
+## Current status: v1.0.0, RELEASED and confirmed on hardware
 
-`build/shepard.uf2` — **1.38% flash, 56.83% RAM**. All six host test suites
-pass.
+`build/shepard.uf2` — **1.38% flash, 56.85% RAM**. All six host test suites
+pass, and every finding below has been verified by ear.
 
 Many listening sessions; the findings below are what they produced.
 The normal engine has comfortable CPU margin. PING at four simultaneous voices
@@ -1258,40 +1258,46 @@ so that case rests on listening, and it has been listened to.
 **Expect audible gentle beating at N=3 regardless** — that is three
 oscillators, not a defect.
 
-## Still to do
+## Status: CONFIRMED ON HARDWARE, released
 
-Everything below has been played on hardware across several sessions; what
-remains is confirmation of the most recent changes and the release chores.
+Every finding in this file has been heard on hardware and confirmed, including
+the last round — the live-path normaliser (24), the equal-power crossfade (25)
+and the HOLD move to Audio In 2 (27) were all verified working in a listening
+session on 2026-08-30, after release.
 
-**`docs/BRINGUP.md` is the ordered first hardware session.** It predates most
-of these findings and its CV Out 2 steps no longer apply — that meter was
-removed once it had served its purpose.
+That matters for how this file should be read. The measurements below are no
+longer predictions awaiting a check; they are the settled behaviour of a card
+that works. **Do not "fix" anything here on the strength of a host measurement
+alone** — several of the entries above record exactly that mistake, where a
+number improved and the sound got worse.
 
-**Unconfirmed on hardware — the level work of this session:**
-
-- The live path against the synth at every layer count. Host says 357–389
-  against 443, spread 0.8 dB. Listen for whether the *loudness* now matches;
-  the crest-factor gap means it will still read slightly softer, and that is
-  expected rather than a fault to chase further.
-- The Y crossfade at the midpoint, which gained 3.6 dB. It should no longer
-  dip in the middle of the sweep.
-- Whether the synth still dominates with X clockwise. If it does after this,
-  the remaining cause is spectral rather than level — the oscillators keep
-  energy up high where the octave stack has rolled off — and the fix would be
-  a gentle tilt on the live path, not more gain.
-
-**Released as v1.0.0 on 2026-08-30**, `draft: false` / `Status: Released`,
-with `UF2/shepard.uf2` populated and a PR opened against
+**Released as v1.0.0 on 2026-08-30**, `draft: false` / `Status: Released`, with
+`UF2/shepard.uf2` populated and PR #392 opened against
 `TomWhitwell/Workshop_Computer` as `releases/104_barbers_pole`.
 
-Note the upstream schema differs from what this repo carried while drafting:
-**`short-description` is REQUIRED and `Description` is not an alias for it**, so
-a card that validates locally can still fail the PR check. `date` is a valid
-alias for `date-created`. Both were corrected at release.
+Note the upstream registry schema differs from what this repo carried while
+drafting, and a file can parse cleanly while still failing the PR check:
+
+- **`short-description` is REQUIRED**, and `Description` is not an alias for it.
+- **`controls.knobs[].when` must be an OBJECT** (`{z: middle|up|down}`), not a
+  prose string; switch positions live under `controls.switch`; LED ids are
+  strings (`LED0`), not integers.
+- `date` is a valid alias for `date-created`.
+
+Run the registry's own validator before submitting rather than assuming — it
+found 25 warnings here that reading the file did not:
+
+    cd ../Workshop_Computer/tools/sitegen && npm install
+    npm run validate-info -- ../../releases/104_barbers_pole/info.yaml
+    git diff --name-status -z upstream/main...HEAD |       node src/validate/prRulesCli.js OUT.json
+
+The second one also catches `duplicate-uf2` — shipping `FLASHME/` alongside
+`UF2/` trips it, since the two are byte-identical.
 
 **Still open:**
 
-- `panels/` is empty - no panel art yet.
-- The level work of this session (findings 24-26) and the HOLD move (finding
-  27) are unheard on hardware. Everything measures correctly on the host, but
-  this card's whole history says that is not the same thing.
+- `panels/` is empty — no panel art yet. The only remaining chore.
+
+**`docs/BRINGUP.md`** is the regression checklist, keyed to the symptom as it
+was actually reported for each finding. Its CV Out 2 steps were dropped when
+that meter was removed.

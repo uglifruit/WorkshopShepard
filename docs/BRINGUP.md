@@ -133,7 +133,8 @@ same window. The source should stay recognisable — that is the whole point of
 this design, and it is the third one tried. A frequency shifter and a rising
 comb were both rejected by ear first.
 
-**This section is the most recent work and is the least confirmed.** Check:
+**Confirmed working on hardware.** The checks below are what to re-run if
+any of it ever regresses:
 
 - **Level against the internal voice.** Sweep Y fully anticlockwise to fully
   clockwise. Host says the two sit within about 2 dB at every layer count.
