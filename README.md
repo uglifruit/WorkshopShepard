@@ -79,7 +79,7 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 | Knob | Function |
 |---|---|
 | **Main** | **Quantise** — smooth glissando, 12-ET chromatic, major, minor, or pentatonic. In a rising glide the chromatic scale is nearly indistinguishable from smooth; the modal settings are what change the character. |
-| **X** | **Stereo width.** |
+| **X** | **Stereo width** — deliberately subtle. It shifts the window slightly between channels, which spreads the image without ever separating an octave from its neighbours. Wider schemes were tried and they break the illusion: panning octaves apart tells the ear they are separate sources, and the stack stops fusing into one endless rise. |
 | **Y** | **Output level.** Holds its current value until actually moved, so changing page never drops the volume. |
 
 ### Switch DOWN — momentary

@@ -86,7 +86,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twenty-one findings, three of them my own fixes making things worse
+## Found on HARDWARE — twenty-two findings, four of them my own changes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -721,6 +721,35 @@ invisible to every numeric test because the DSP was correct in each case; what
 was wrong was which control fed what. Worth remembering when a card gains a
 mode: the new mode reuses jacks and knobs that already mean something, and the
 old meaning does not switch itself off.
+
+### 22. Alternate-layer panning was tried and REVERTED — it breaks the illusion
+
+The stereo width is deliberately subtle, and that is not a defect to fix.
+
+The window-offset scheme reaches only 0.90 L/R correlation at maximum, which
+is barely wide. I measured that, called it weak, and replaced it with
+alternate-layer panning — even layers left, odd right — which measures 0.009
+at full width. Numerically a far better stereo control.
+
+**It destroys the effect.** The Shepard illusion depends on the octave-spaced
+components being heard as ONE fused stack. Panning alternate octaves to
+opposite sides is precisely the cue that tells the ear they are separate
+sources, so the stack stops fusing and the endless-rise reads as several
+independent lines moving in parallel.
+
+Reverted. The window offset stays, and its weakness is the point: it
+redistributes gain slightly between channels **without ever separating an
+octave from its neighbours**, so the stack stays fused and the outputs are
+close to mono by design.
+
+**Do not "improve" the stereo width by decorrelating the layers.** Any scheme
+that gives an octave a different spatial position from the octave above it
+will measure better and sound worse. If more width is ever wanted, it has to
+come from something that leaves the layer-to-layer relationship intact — a
+downstream effect, or a treatment applied equally to every layer.
+
+Filed alongside the window itself in the list of things whose apparent
+weakness is load-bearing.
 
 ### The lesson, which is the same one four times
 
