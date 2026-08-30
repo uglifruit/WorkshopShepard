@@ -34,7 +34,6 @@
 #include "ComputerCard.h"
 
 #include "pico/multicore.h"
-#include "hardware/timer.h"
 #include "hardware/clocks.h"
 
 #include "fixed.h"
@@ -65,9 +64,6 @@ static constexpr int32_t kBootSplash = 36000;   // 0.75 s
 // EVEN number of toggles leaves it off, which reads as "freeze works only
 // sometimes". 20 ms outrides bounce while staying far below a deliberate tap.
 static constexpr int32_t kSwitchSettle = 960;
-
-// Hold Down this long for SEALED freeze rather than normal freeze.
-static constexpr int32_t kLongPress = 96000;    // 2 s
 
 // How long the switch must sit still before a page change commits. Up and
 // Middle are NOT adjacent - reaching Down from Up passes through Middle - so
@@ -171,7 +167,6 @@ class ShepardCard : public ComputerCard {
   }
 
   virtual void __not_in_flash_func(ProcessSample)() override {
-    const uint32_t t0 = timer_hw->timerawl;
 
     // --- boot mute --------------------------------------------------------
     if (boot_mute_ > 0) {
@@ -276,38 +271,20 @@ class ShepardCard : public ComputerCard {
     AudioOut1((int16_t)SoftClipOut(l));
     AudioOut2((int16_t)SoftClipOut(r));
 
-    // CV 1: master phase as a 0-5 V ramp, one cycle per octave. This is the
-    // card's clock - patch it to watch the glide, or to drive something else
-    // in step with it.
-    CVOut1((int16_t)((int32_t)(master_out_q32_ >> 21) - 2048));
-
-    // Pulse Out 1: one trigger per octave wrap - the card's own clock, locked
-    // to the glide. Self-patch it to Pulse In 1 to advance a scale step every
-    // octave, or use it to clock something else in time with the illusion.
+    // CV 1: the master phase as a 0-1 V ramp, ONE OCTAVE on a V/oct input.
     //
-    // Counted down in samples rather than held by a flag, so the width is
-    // fixed regardless of glide speed. At 8 oct/s the wraps are 125 ms apart,
-    // so a 5 ms pulse still has ample gap.
-    if (wrap_pulse_ > 0) {
-      --wrap_pulse_;
-      PulseOut1(true);
-    } else {
-      PulseOut1(false);
-    }
-
-    // CV 2: measured DSP load, as a fraction of the per-sample budget. Full
-    // scale = the ISR exactly filling its 20.83 us.
+    // Calibrated per card via CVOutMillivolts rather than scaled by hand, so
+    // an oscillator patched to it tracks the pole's climb in tune.
     //
-    // This is the authority on whether the card fits, and it exists because
-    // the sibling project was MODELLED at 51% and ran at 231%. No peak hold
-    // and no decay - the live figure, so it can be watched on a meter while
-    // knobs move to find which combination is expensive.
+    // CV 2: the WINDOW level at that same phase - which is what layer 0 is
+    // doing. Patch both to a VCA and its pitch input and you get one Shepard
+    // layer made external: it rises in pitch while swelling and fading, then
+    // the next cycle begins.
     {
-      const uint32_t dt = timer_hw->timerawl - t0;
-      load_us_ = dt;
-      int32_t load = (int32_t)((dt * 2047u) / 21u);
-      if (load > 2047) load = 2047;
-      CVOut2((int16_t)load);
+      const uint32_t ph = master_out_q32_;
+      CVOut1Millivolts((int32_t)(ph >> 22) * 1000 / 1024);
+      // HannQ15 is Q15; scale to 0-5 V so it drives a VCA over its full range.
+      CVOut2Millivolts(MulQ15(HannQ15(ph), 5000));
     }
 
     UpdateLeds();
@@ -328,7 +305,7 @@ class ShepardCard : public ComputerCard {
       // synth voice's 443, with ~4 dB of headroom and no clipping on any of
       // them. Unlike the comb this path's level barely depends on source type,
       // because it transposes rather than resonates.
-      octave_.Write(sealed_ ? 0 : ((int32_t)AudioIn1() << 5));
+      octave_.Write((int32_t)AudioIn1() << 5);
     }
 
     for (int i = 0; i < active_layers_; ++i) {
@@ -813,38 +790,23 @@ class ShepardCard : public ComputerCard {
     // since at press time the length is unknown; the exception is the 2 s mark
     // itself, which engages while still held so there is feedback before
     // letting go.
-    if (sw == Switch::Down) {
-      if (down_held_ < kLongPress) {
-        ++down_held_;
-        if (down_held_ == kLongPress) {
-          freeze_latch_ = true;
-          sealed_latch_ = true;
-        }
-      }
-    }
-
     if (sw != last_switch_ && switch_settle_ == 0) {
       const Switch prev = last_switch_;
       last_switch_ = sw;
       switch_settle_ = kSwitchSettle;
 
       if (sw == Switch::Down) {
-        down_held_ = 0;
         // Reaching Down cancels any pending page change. Without this a flick
         // from Up that paused at Middle would arm a change and then commit it
         // while Down was held, dropping the page.
         page_settle_ = 0;
       } else if (prev == Switch::Down) {
-        if (down_held_ < kLongPress) {
-          if (freeze_latch_) {
-            freeze_latch_ = false;
-            sealed_latch_ = false;
-          } else {
-            freeze_latch_ = true;
-            sealed_latch_ = false;
-          }
-        }
-        down_held_ = 0;
+        // A press toggles freeze. There is no long-press variant: SEALED was
+        // inherited from WorkshopSpectral, where it held each bin's phase
+        // ADVANCE in a frozen spectrum and was genuinely distinct. Here it
+        // only muted the live input, which Y already does - a hidden
+        // two-second gesture duplicating a knob.
+        freeze_latch_ = !freeze_latch_;
       } else {
         // A page change between the two stable positions, DEFERRED - see
         // kPageSettle. Coming back from a Down press must not re-page.
@@ -900,7 +862,6 @@ class ShepardCard : public ComputerCard {
     gate_freeze_ = ping_mode_ ? false : pulse1;
 
     freeze_ = freeze_latch_ || gate_freeze_;
-    sealed_ = sealed_latch_ && !gate_freeze_;
 
     // One knob per sample, round-robin. Each still updates at ~16 kHz, far
     // faster than a hand.
@@ -984,11 +945,7 @@ class ShepardCard : public ComputerCard {
 
     // Bottom row: freeze state and page.
     const int32_t tri = tri_pk;
-    if (sealed_) {
-      LedBrightness(3, (uint16_t)(1000 + tri * 3));   // pulse = SEALED
-    } else {
-      LedBrightness(3, freeze_ ? 4095 : 0);           // steady = normal
-    }
+    LedBrightness(3, freeze_ ? 4095 : 0);
 
     // In SPIRAL mode both page LEDs carry a slow counter-phase glow, so the
     // alt-boot stays obvious after the splash has gone.
@@ -1014,7 +971,6 @@ class ShepardCard : public ComputerCard {
   int page_;
   Switch last_switch_;
   int32_t switch_settle_ = 0;
-  int32_t down_held_ = 0;
   int32_t page_settle_ = 0;
   int pending_page_ = 0;
   bool last_pulse1_ = false;
@@ -1059,16 +1015,13 @@ class ShepardCard : public ComputerCard {
   bool freeze_ = false;
   bool gate_freeze_ = false;
   bool reverse_ = false;
-  bool sealed_ = false;
   bool freeze_latch_ = false;
-  bool sealed_latch_ = false;
   uint32_t trigger_count_ = 0;
   uint32_t trigger_seen_ = 0;
 
   int32_t param_level_ = 32767;
   int32_t level_smooth_ = 32767;
 
-  uint32_t load_us_ = 0;
   int led_phase_ = 0;
   int32_t led_pulse_ = 0;
 };

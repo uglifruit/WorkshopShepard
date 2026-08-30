@@ -8,15 +8,19 @@ reuse their conventions where they fit.
 **SHEPARD generates Shepard–Risset tones**: octave-spaced components sliding
 through a fixed spectral envelope, so pitch appears to rise or fall forever.
 
-## Current status: v0.1.1, FLASHED ONCE, three hardware bugs fixed
+## Current status: v0.2.0, approaching release
 
-`build/shepard.uf2` — **1.28% flash, 55.95% RAM**. All five host test suites
-pass.
+`build/shepard.uf2` — **1.35% flash, 56.7% RAM**. All host test suites pass.
 
-**It has been on hardware once.** That session found three bugs (below), all in
-the control path, all invisible to a green test suite. They are fixed but the
-fixes are NOT yet confirmed by ear — the card needs reflashing and listening to
-again before anything here is called working.
+Many listening sessions; the twenty-two findings below are what they produced.
+The normal engine has comfortable CPU margin. PING at four simultaneous voices
+with the live input mixed in sits close to the ceiling and **will** distort if
+triggered densely — that is documented as a limit rather than treated as a bug.
+
+**Removed on the way to release:** the CV Out 2 DSP-load meter (it had served
+its purpose), and SEALED freeze (inherited from SPECTRAL, where it held phase
+advance in a frozen spectrum; here it only muted the live input, which Y
+already does).
 
 ## The bugs found before hardware, and why they matter
 

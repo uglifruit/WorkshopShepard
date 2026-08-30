@@ -62,13 +62,14 @@ summary: |
   Snapping is slewed over about 1.4 ms rather than jumped, because twelve
   oscillators stepping together is audible as a thump.<br><br>
 
-  Switch Down is spring-loaded: a short press toggles FREEZE, holding for two
-  seconds toggles SEALED freeze which also silences the live input. Pulse In 1
+  Switch Down is spring-loaded and toggles FREEZE on each press. Pulse In 1
   freezes from a gate and resumes from exactly where it paused - the glide does
   not run on underneath - and its rising edge advances a scale step in the
   stepped modes. Pulse In 2 reverses the glide while held. CV In 1 and 2 offset
-  speed and density. CV Out 1 is the master phase as a 0-5V ramp, one cycle per
-  octave; CV Out 2 reports the measured DSP load.<br><br>
+  speed and density. CV Out 1 is the master phase as a 0-1V ramp - one octave per cycle,
+  so an oscillator tracks the pole in tune - and CV Out 2 is the window level
+  at that phase, so the two together drive a VCA and oscillator as one Shepard
+  layer made external.<br><br>
 
   ALT-BOOT - PING: holding the switch DOWN at power-on makes the pole climb
   SILENTLY. A trigger on Pulse In 1 voices a ping at whatever pitches the pole
@@ -78,6 +79,12 @@ summary: |
   the barber's pole becomes something you play rather than something you listen
   to. Four voices, oldest stolen. Page-two X sets the decay, 17ms to 1.7s; Main still quantises.
   Patch Pulse Out 1 back to Pulse In 1 and it strikes itself once per octave.
+  Note that four voices of twelve layers each, with the live input
+  octave-stacked through all of them, is close to what an RP2040 can do at
+  48kHz - trigger fast enough that all four ring at once, with a long decay and
+  the input mixed in, and the card WILL distort. That is the processor running
+  out of time rather than a fault, and no setting removes it; shorten the
+  decay, use fewer layers, or play a little more sparsely.
   With Y clockwise the live input is gated by the ping envelope AND transposed
   to the struck pitches, so your own signal is what rings.<br><br>
 
@@ -101,10 +108,9 @@ summary: |
   build on each run, so a detector that cannot fire is never mistaken for a
   pass.<br><br>
 
-  Flash 1.3%, RAM 56%, both from the linker. The DSP load is NOT yet measured:
-  the estimate is roughly 45-50% of the per-sample budget, but SPECTRAL was
-  modelled at 51% and ran at 231% on real hardware, so CV Out 2 is the authority
-  and nobody has read it. See docs/BRINGUP.md.
+  Flash 1.4%, RAM 57%, both from the linker. Measured on hardware, the normal
+  engine has comfortable margin; PING at four simultaneous voices with the live
+  input mixed in sits close to the ceiling - see the note above.
 
 panel:
   inputs:
@@ -129,10 +135,10 @@ panel:
       name: Freeze
       type: pulse
       description: >
-        Holds the stack while high and resumes from exactly where it paused -
-        the glide does not run on underneath, so releasing never jumps ahead.
-        Its rising edge also advances one scale degree in the stepped
-        quantisation modes.
+        In normal boot: holds the stack while high and resumes from exactly
+        where it paused, so releasing never jumps ahead; its rising edge also
+        advances one scale degree in the stepped modes. In PING: the strike
+        trigger, which does not freeze the pole.
     - id: PulseIn2
       name: Reverse
       type: pulse
@@ -153,11 +159,20 @@ panel:
         rather than the oscillator phase, so a mono sum stays valid and never
         cancels.
     - id: CVOut1
-      name: Phase
+      name: Pitch
       type: cv
       description: >
-        Master glide position as a 0-5V ramp, one full cycle per octave. Patch
-        it to watch the glide, or to drive something else in step with it.
+        Master glide position as a 0-1V ramp - ONE OCTAVE per cycle, so an
+        oscillator patched here climbs in tune with the pole. Calibrated per
+        card rather than scaled by hand.
+    - id: CVOut2
+      name: Level
+      type: cv
+      description: >
+        The window level at the master phase - what the bottom layer of the
+        stack is doing. Patch CV Out 1 to an oscillator's V/oct and this to a
+        VCA and you get one Shepard layer made external: rising in pitch while
+        swelling and fading, then beginning again.
     - id: PulseOut1
       name: Octave
       type: pulse
@@ -165,13 +180,6 @@ panel:
         One trigger per octave wrap - the card's own clock, locked to the
         glide. Self-patch it to Pulse In 1 to advance a scale step every cycle,
         or use it to clock something else in time with the illusion.
-    - id: CVOut2
-      name: DSP Load
-      type: cv
-      description: >
-        Measured cost of the audio ISR as a fraction of its 20.83us budget,
-        live and unsmoothed. Full scale means the ISR is exactly filling its
-        budget.
 
 controls:
   knobs:
@@ -199,10 +207,12 @@ controls:
       main:
         name: QUANTISE
         description: >
-          Smooth glissando, 12-ET chromatic, major, minor or pentatonic. In a
-          rising glide the chromatic setting is nearly indistinguishable from
-          smooth; the modal ones are what change the character. Steps are
-          slewed over about 1.4ms rather than snapped.
+          Smooth glissando, or one of four scales that repeat every octave:
+          chromatic (0 1 2 3 4 5 6 7 8 9 10 11), major (0 2 4 5 7 9 11), minor
+          (0 2 3 5 7 8 10) or pentatonic (0 2 4 7 9). In a rising glide the
+          chromatic setting is nearly indistinguishable from smooth, so the
+          modal ones are what change the character. Steps are slewed over
+          about 1.4ms rather than snapped.
       x:
         name: WIDTH
         description: >
@@ -258,7 +268,7 @@ controls:
           name: Phase (quarter 3)
         - id: 3
           name: Freeze
-          description: Steady for normal freeze, slow pulse for SEALED freeze.
+          description: Lit while the stack is frozen.
         - id: 4
           name: Page 1
         - id: 5
@@ -270,5 +280,5 @@ controls:
           name: Boot mode
           description: >
             LEDs 0, 2 and 4 light together for a normal boot; LEDs 1, 3 and 5
-            for the SPIRAL alt-boot. Held for about three quarters of a second
+            for the PING alt-boot. Held for about three quarters of a second
             after the switch is read.

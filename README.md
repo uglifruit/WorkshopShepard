@@ -10,8 +10,8 @@ a pitch that rises or falls forever without ever leaving its range.
 > a glide running 32× slow — but it is **not finished**, and the fixes from the
 > most recent round have not themselves been heard yet.
 >
-> There is no released binary and the DSP load is still unmeasured. See
-> [docs/BRINGUP.md](docs/BRINGUP.md) for the ordered hardware session.
+> There is no released binary yet. See [docs/BRINGUP.md](docs/BRINGUP.md) for
+> the ordered hardware session.
 
 ## What it does
 
@@ -78,31 +78,44 @@ right: Main, X, Y), so you can see which ones are still to be picked up.
 
 | Knob | Function |
 |---|---|
-| **Main** | **Quantise** — smooth glissando, 12-ET chromatic, major, minor, or pentatonic. In a rising glide the chromatic scale is nearly indistinguishable from smooth; the modal settings are what change the character. |
+| **Main** | **Quantise** — see the scale table below. |
 | **X** | **Stereo width** — deliberately subtle. It shifts the window slightly between channels, which spreads the image without ever separating an octave from its neighbours. Wider schemes were tried and they break the illusion: panning octaves apart tells the ear they are separate sources, and the stack stops fusing into one endless rise. |
 | **Y** | **Output level.** Holds its current value until actually moved, so changing page never drops the volume. |
+
+#### Scales
+
+| Setting | Degrees (semitones from the root) |
+|---|---|
+| **Smooth** | none — a continuous glissando |
+| **Chromatic** | 0 1 2 3 4 5 6 7 8 9 10 11 |
+| **Major** | 0 2 4 5 7 9 11 |
+| **Minor** | 0 2 3 5 7 8 10 |
+| **Pentatonic** | 0 2 4 7 9 |
+
+The scale repeats every octave, so the glide walks the same degrees forever.
+In a *rising* glide the chromatic setting is nearly indistinguishable from
+smooth — every semitone is present either way — so the modal settings are what
+actually change the character.
 
 ### Switch DOWN — momentary
 
 - **Short press** toggles **FREEZE**: the stack stops moving through the
   envelope but keeps sounding. Pulse In 1 does the same from a gate, and
   resumes from exactly where it paused rather than jumping ahead.
-- **Hold for two seconds** toggles **SEALED** freeze, which also silences the
-  live input — a true static hold. LED 3 pulses in sealed, steady in normal.
-- Any short press returns to live.
+- LED 3 lights while frozen; press again to resume.
 
 ### Jacks
 
 | Jack | Function |
 |---|---|
-| Audio In 1 | Source for the frequency shifter, and for SPIRAL |
+| Audio In 1 | Source for the octave stack, in both modes |
 | CV In 1 | Bipolar speed offset, summed with Main |
 | CV In 2 | Bipolar density offset, summed with X |
 | Pulse In 1 | **Freeze while high** — resumes from where it stopped, and advances one scale degree on the rising edge in stepped modes |
 | Pulse In 2 | **Reverse direction while high** |
 | Audio Out 1 / 2 | Stereo output |
-| CV Out 1 | Master phase, a 0–5 V ramp — one cycle per octave |
-| CV Out 2 | Measured DSP load |
+| CV Out 1 | Master phase — a 0–1 V ramp, **one octave per cycle** on a V/oct input |
+| CV Out 2 | Window level — swells and fades as CV Out 1 rises |
 | Pulse Out 1 | One trigger per octave wrap — the card's own clock, locked to the glide |
 
 ## The octave stack
@@ -152,18 +165,19 @@ card advances a scale step every time the stack completes a cycle; or use it to
 clock something else in time with the illusion. At a slow glide that is a pulse
 every few seconds, at full speed about eight per second.
 
-## Reading the DSP load
+## The CV outputs
 
-CV Out 2 reports the measured cost of the audio ISR as a fraction of its
-20.83 µs budget, live and with no smoothing, so it can be watched on a
-voltmeter while knobs are moved. Full scale means the ISR is exactly filling
-its budget.
+**CV Out 1** is the master phase as a **0–1 V ramp**, one octave per cycle, so
+an oscillator patched to it climbs in tune with the pole. It is calibrated per
+card rather than scaled by hand.
 
-This is the authority on whether the card fits — not any figure in this README.
+**CV Out 2** is the window level at that same phase — what the bottom layer of
+the stack is doing.
 
-**It has not been read yet.** The estimate is roughly 45–50% of budget, but the
-sibling card SPECTRAL was modelled at 51% and measured 231% on real hardware.
-Until a voltmeter says otherwise, the cost of this card is unknown.
+Patch both together and you get one Shepard layer made external: send CV Out 1
+to an oscillator's V/oct and CV Out 2 to a VCA, and it rises in pitch while
+swelling and fading, then the next cycle begins. Add more voices patched the
+same way and offset, and you can build the illusion outside the card.
 
 ## PING mode (alt-boot)
 
@@ -207,6 +221,16 @@ decay knob does nothing until you nudge X.
 
 Four voices, oldest stolen when all are busy, so the newest four strikes are
 always the ones sounding.
+
+> **A caveat about fast triggering.** Four voices, twelve layers each, with the
+> live input octave-stacked through all of them, is close to what an RP2040 can
+> do at 48 kHz. Trigger fast enough that all four voices are ringing at once —
+> especially with a long decay and Y clockwise — and the card will distort.
+>
+> That is the processor running out of time, not a bug, and there is no setting
+> that makes it go away: it is the honest ceiling of the mode. If you hit it,
+> shorten the decay, turn X down to fewer layers, or trigger a little less
+> densely. Sparse playing has plenty of margin.
 
 **Patch Pulse Out 1 back into Pulse In 1** and the card strikes itself once per
 octave — a self-playing instrument whose pitch sequence never repeats within a
@@ -261,7 +285,8 @@ check re-implements the integer algorithm and asserts against a reference:
 | `tools/shepard_check.py` | window constant-sum, pow2 accuracy, 1/√N, Nyquist, illusion continuity |
 | `tools/quant_check.py` | scale tables, the octave wrap, portamento direction, stepping |
 | `tools/hilbert_check.py` | allpass transfer function, quadrature, sideband rejection, both coefficient traps |
-| `tools/spiral_check.py` | shift ratio, crossfade, buffer bounds, loop stability run at DC |
+| `tools/ping_check.py` | pitch frozen after a strike, envelope range, voice stealing, polyphonic headroom, knob-collision and trigger-freeze wiring |
+| `tools/octave_check.py` | transposition ratio, crossfade sum, recycle rates, head rotation at the wrap |
 | `tools/passthru_check.py` | **end-to-end gain — the authority on scaling** |
 
 Two of these found real bugs during development. `shepard_check.py` caught a
