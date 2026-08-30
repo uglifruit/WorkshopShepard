@@ -25,7 +25,7 @@ OCT_LEN = 1 << OCT_BITS
 OCT_MASK = OCT_LEN - 1
 OCT_WIN = 16384
 OCT_MAX_RATE = 262144
-MAX_LAYERS = 12
+MAX_LAYERS = 11
 
 SIN_LUT = [int(round(math.sin(2.0 * math.pi * i / 1024) * 32767.0))
            for i in range(1024)]

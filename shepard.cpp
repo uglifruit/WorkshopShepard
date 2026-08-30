@@ -26,7 +26,6 @@ const int16_t kInvSqrtN[kMaxLayers + 1] = {
   10923,                   // N = 9    0.333333
   10362,                   // N = 10   0.316228
    9880,                   // N = 11   0.301511
-   9459,                   // N = 12   0.288675
 };
 
 // Scale degrees as Q32 offsets within one octave: degree at c cents is

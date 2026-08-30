@@ -28,10 +28,29 @@
 
 namespace shepard {
 
-// Layer count range, from the X knob. 3 is the floor because two layers do not
-// read as a continuous stack - you hear two oscillators, not an illusion.
+// Layer count range, from the X knob.
+//
+// 3 is the floor because two layers do not read as a continuous stack - you
+// hear two oscillators, not an illusion.
+//
+// 11 is the ceiling because of NYQUIST, and the reason is worth recording
+// since 12 looks like the natural number and was the original choice.
+//
+// Each layer added shifts the perceived pitch of the stack up by half a
+// window slot, which at octave spacing is exactly +600 cents. That is even
+// from N=3 to N=11 - measured 0.0 cents of deviation.
+//
+// At N=12 the top layer sits at 13.75 * 2^11 = 28160 Hz, above the 24 kHz
+// Nyquist limit. It still carries window gain (0.067) and still counts in the
+// constant-sum, but contributes NOTHING audible - so the audible centre lands
+// 68 cents short of where the pattern leads the ear to expect. Heard on
+// hardware as the pitch dropping about a semitone when the last layer is
+// added, and very obvious when frozen.
+//
+// Capping at 11 keeps the top layer at 14080 Hz, comfortably audible, so
+// every layer contributes and the pattern stays even all the way up.
 static constexpr int kMinLayers = 3;
-static constexpr int kMaxLayers = 12;
+static constexpr int kMaxLayers = 11;
 
 // Sine table. 1024 entries of Q15, linear interpolation between them.
 //

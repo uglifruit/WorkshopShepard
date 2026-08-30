@@ -19,7 +19,7 @@ import math
 import sys
 
 SR = 48000
-MAX_LAYERS = 12
+MAX_LAYERS = 11
 PING_VOICES = 4
 PING_ATTACK = 6
 PING_ENV_SHIFT = 9
@@ -237,12 +237,12 @@ def check_voice_stealing():
 def check_polyphony_headroom():
     """All voices sounding at once must not overflow the accumulator."""
     print("  headroom with every voice ringing:")
-    inv_sqrt = {12: 9459}
+    inv_sqrt = {11: 9880}
     def hann(u):
         return math.sin(math.pi * u) ** 2
 
     ok = True
-    for N, inv in ((3, 18919), (8, 11585), (12, 9459)):
+    for N, inv in ((3, 18919), (8, 11585), (11, 9880)):
         voices = [Voice() for _ in range(PING_VOICES)]
         wins = []
         for vi, v in enumerate(voices):

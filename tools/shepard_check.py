@@ -23,7 +23,7 @@ import sys
 SIN_LUT_SIZE = 1024
 POW2_LUT_SIZE = 256
 MIN_LAYERS = 3
-MAX_LAYERS = 12
+MAX_LAYERS = 11
 SR = 48000
 
 
@@ -78,7 +78,7 @@ def pow2_q30(f_q32):
 
 
 INV_SQRT_N = [0, 0, 0, 18919, 16384, 14654, 13377, 12385,
-              11585, 10923, 10362, 9880, 9459]
+              11585, 10923, 10362, 9880]
 
 
 def layer_u_q32(master_q32, i, n):
@@ -169,7 +169,7 @@ def check_layer_entry():
               f"{'ok' if entry_ok and smooth_ok else 'FAIL'}")
 
     print("    after one octave the stack repeats, shifted one slot:")
-    for n in (3, 8, 12):
+    for n in (3, 8, 11):
         before = [hann_q15(layer_u_q32(0xFFFFF000, i, n)) for i in range(n)]
         after = [hann_q15(layer_u_q32(0x00001000, i, n)) for i in range(n)]
         worst = max(abs(after[i] - before[i - 1]) for i in range(1, n))
@@ -301,7 +301,7 @@ def check_nyquist():
     print("  Nyquist headroom (f_base = 13.75 Hz, A-1):")
     f_base = 13.75
     ok = True
-    for n in (3, 8, 12):
+    for n in (3, 8, 11):
         top = f_base * (2 ** (n - 1)) * 2.0    # worst case: master at top of octave
         print(f"    N={n:2d}: top layer reaches {top:9.1f} Hz "
               f"({'above' if top > SR / 2 else 'below'} Nyquist {SR // 2})")
@@ -394,6 +394,70 @@ def check_illusion():
     return ok
 
 
+def check_layer_count_pitch_steps():
+    """Adding a layer must shift the perceived pitch by a CONSISTENT amount.
+
+    THE BUG THIS EXISTS FOR. Each layer added moves the window peak up half a
+    slot, which at octave spacing is exactly +600 cents - and that held from
+    N=3 to N=11. At N=12 the top layer landed at 28160 Hz, above the 24 kHz
+    Nyquist limit: it still carried window gain and still counted in the
+    constant-sum, but contributed nothing audible, so the AUDIBLE centre fell
+    68 cents short of the pattern.
+
+    Heard on hardware as the pitch dropping about a semitone when the last
+    layer was added, and obvious when frozen because no glide masked it. Fixed
+    by capping kMaxLayers at 11, where every layer is below Nyquist.
+
+    The measurement has to weight by AUDIBILITY - a layer above Nyquist must
+    be excluded - or it reports the pattern as even and misses the fault
+    entirely.
+    """
+    print("  pitch step per added layer is consistent:")
+    ok = True
+    nyquist = SR / 2.0
+    prev = None
+    steps = []
+
+    for n in range(MIN_LAYERS, MAX_LAYERS + 1):
+        num = den = 0.0
+        for i in range(n):
+            f = 13.75 * (2 ** i)
+            if f >= nyquist:          # inaudible - must not count
+                continue
+            w = hann_q15(layer_u_q32(0, i, n)) / 32767.0
+            num += w * math.log2(f)
+            den += w
+        centroid = 2 ** (num / den) if den else 0.0
+        if prev:
+            cents = 1200 * math.log2(centroid / prev)
+            steps.append(cents)
+            print(f"    N={n:2d}: {centroid:8.1f} Hz  {cents:+7.1f} cents")
+        else:
+            print(f"    N={n:2d}: {centroid:8.1f} Hz")
+        prev = centroid
+
+    if steps:
+        lo, hi = min(steps), max(steps)
+        spread = hi - lo
+        print(f"    steps span {lo:+.1f} to {hi:+.1f} cents "
+              f"(spread {spread:.1f})")
+        # A 68-cent outlier is what reached hardware; 25 catches that with
+        # room for the window's own rounding.
+        if spread > 25.0:
+            ok = False
+            print("    INCONSISTENT - one layer count is out of step")
+        else:
+            print("    even throughout  ok")
+
+    # And no layer may sit above Nyquist at any count.
+    worst = 13.75 * (2 ** (MAX_LAYERS - 1))
+    print(f"    top layer at N={MAX_LAYERS}: {worst:.0f} Hz "
+          f"({'below' if worst < nyquist else 'ABOVE'} Nyquist)")
+    if worst >= nyquist:
+        ok = False
+    return ok
+
+
 def main():
     print("SHEPARD oscillator bank check")
     ok = check_window_sum()
@@ -404,6 +468,7 @@ def main():
     ok &= check_inv_sqrt()
     ok &= check_nyquist()
     ok &= check_illusion()
+    ok &= check_layer_count_pitch_steps()
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

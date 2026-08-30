@@ -90,7 +90,7 @@ remembering: `spiral_check.py` exercises `SpiralDelay::Process` with a rate
 handed to it, so the knob-to-rate mapping was never in the loop. A unit test
 that starts *downstream of the control path* cannot see a broken control path.
 
-## Found on HARDWARE — twenty-two findings, four of them my own changes making things worse
+## Found on HARDWARE — twenty-three findings, four of them my own changes making things worse
 
 The first two listening sessions. Every host suite was green throughout, which
 is the point: three were in the control path, and the fourth hid behind an
@@ -755,6 +755,37 @@ downstream effect, or a treatment applied equally to every layer.
 Filed alongside the window itself in the list of things whose apparent
 weakness is load-bearing.
 
+### 23. The twelfth layer dropped the pitch a semitone
+
+*"When I move the X knob clockwise and add the last octave the pitch drops
+~a semitone... it's very audible if frozen."*
+
+Layer FREQUENCIES do not depend on N at all — `inc[i] = inc0 << i` never sees
+it. What N changes is which layers the WINDOW makes loud, and each layer added
+moves the window peak up half a slot, which at octave spacing is exactly
+**+600 cents**. Measured even from N=3 to N=11: 0.0 cents of deviation.
+
+At N=12 the top layer sits at 13.75 × 2¹¹ = **28160 Hz, above the 24 kHz
+Nyquist limit.** It still carried window gain (0.067) and still counted in the
+constant-sum, but contributed nothing audible — so the AUDIBLE centre landed
+**68 cents short** of where the pattern leads the ear to expect. That is the
+semitone, and frozen makes it obvious because no glide masks it.
+
+`kMaxLayers` is now **11**, where the top layer is 14080 Hz and every layer
+contributes.
+
+**A second, smaller fault found on the way:** an above-Nyquist increment was
+CLAMPED to `0x7FFFFFFF`, pinning that oscillator to exactly Nyquist — an
+audible artefact instead of the silence it should give. Letting it wrap would
+be worse still: the increment aliases, and as the pole rises the alias
+DESCENDS, giving a tone moving against the illusion. Now silenced outright.
+
+`shepard_check.py::check_layer_count_pitch_steps` asserts the step is
+consistent across every layer count, and **fails with a 67.7-cent spread if
+kMaxLayers is put back to 12** — verified. The measurement has to weight by
+AUDIBILITY, excluding anything above Nyquist, or it reports the pattern as even
+and misses the fault entirely.
+
 ### The lesson, which is the same one four times
 
 A test that begins *downstream* of the thing that is broken cannot see it.
@@ -783,7 +814,7 @@ window.** `shepard_check.py` asserts it at every N.
 
 ## Sizing, and why
 
-**3–12 layers, `f_base` = 13.75 Hz (A−1), 192 MHz, control rate = 48 kHz / 32.**
+**3–11 layers, `f_base` = 13.75 Hz (A−1), 192 MHz, control rate = 48 kHz / 32.**
 
 - **192 MHz** — proven on this hardware by grains/51, glitter/53 and SPECTRAL.
 - **Control rate K=32** puts worst-case pitch drift at 6.4 cents within a

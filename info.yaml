@@ -46,7 +46,7 @@ summary: |
 
   Main sets speed and direction, with a deadzone at noon so the stationary
   position can be found by feel — anticlockwise descends, clockwise ascends, and
-  CV In 1 is summed in. X sets density, 3 to 12 octave layers, stepped discretely with hysteresis so knob jitter cannot retrigger a change. Y crossfades
+  CV In 1 is summed in. X sets density, 3 to 11 octave layers, stepped discretely with hysteresis so knob jitter cannot retrigger a change. Y crossfades
   between two sources: the internal sine bank, and your own signal
   OCTAVE-STACKED.<br><br>
 
@@ -89,10 +89,10 @@ summary: |
   to the struck pitches, so your own signal is what rings.<br><br>
 
   All fixed point: the RP2040 has no FPU, so a float multiply costs ~360ns
-  against a 20.8us per-sample budget. Two economies make a twelve-layer stereo
+  against a 20.8us per-sample budget. Two economies make a eleven-layer stereo
   bank affordable — because the layers are exactly an octave apart every layer's
   increment is layer 0's shifted left by i, so ONE exponential lookup serves all
-  twelve at 1.5kHz rather than 48kHz; and the octave stack's read heads all
+  eleven at 1.5kHz rather than 48kHz; and the octave stack's read heads all
   share one delay buffer, which is the card's single large allocation. The envelope reuses the first half of
   the sine table rather than needing one of its own, and sums to exactly N/2 at
   every layer count and phase.<br><br>
@@ -232,7 +232,7 @@ controls:
           consecutive pings land.
       x:
         name: DENSITY
-        description: 3 to 12 octave layers in each strike.
+        description: 3 to 11 octave layers in each strike.
       y:
         name: SOURCE
         description: >

@@ -718,12 +718,22 @@ class ShepardCard : public ComputerCard {
     }
 
     for (int i = 0; i < active_layers_; ++i) {
-      // Clamp rather than let an increment wrap: a wrapped increment is not a
-      // subtle artefact, it is a loud wrong note.
-      uint32_t inc = ctl_inc0_ << i;
-      if (i >= 20 || (ctl_inc0_ != 0 && (inc >> i) != ctl_inc0_)) inc = 0x7FFFFFFFu;
-      if (inc > 0x7FFFFFFFu) inc = 0x7FFFFFFFu;
-      inc_[i] = inc;
+      // A layer past Nyquist is SILENCED, not clamped.
+      //
+      // Clamping to 0x7FFFFFFF pins the oscillator to exactly Nyquist, which
+      // is an audible artefact rather than the nothing it should be - a
+      // component above half the sample rate cannot be reproduced, so the
+      // honest answer is silence. Letting it wrap instead is worse still: the
+      // increment aliases, and as the pole RISES the alias descends, giving a
+      // tone moving against the illusion.
+      //
+      // With kMaxLayers = 11 this only happens in the top eighth of the
+      // master sweep, where the window has already faded that layer to 0.001
+      // - so it is inaudible either way and this is correctness rather than a
+      // fix for something heard. `over` is checked before the shift so the
+      // test itself cannot overflow.
+      const bool over = (i >= 31) || (ctl_inc0_ > (0x7FFFFFFFu >> i));
+      inc_[i] = over ? 0u : (ctl_inc0_ << i);
 
       // Shift ratio for this layer: 2^(master + i - N/2), CENTRED so the
       // rates straddle unity rather than running from 1x upward. Heads reading

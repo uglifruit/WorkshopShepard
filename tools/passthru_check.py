@@ -22,7 +22,7 @@ import math
 import sys
 
 MIN_LAYERS = 3
-MAX_LAYERS = 12
+MAX_LAYERS = 11
 DAC_MAX = 2047
 
 SIN_LUT = [int(round(math.sin(2.0 * math.pi * i / 1024) * 32767.0))
@@ -34,7 +34,7 @@ for _i in range(257):
     POW2_LUT.append(2147483647 if _v >= 2147483647.0 else int(round(_v)))
 
 INV_SQRT_N = [0, 0, 0, 18919, 16384, 14654, 13377, 12385,
-              11585, 10923, 10362, 9880, 9459]
+              11585, 10923, 10362, 9880]
 
 BASE_INC = 1229782
 
@@ -180,7 +180,7 @@ def check_no_clipping_at_extremes():
     """
     print("  clipper engagement in normal use:")
     ok = True
-    for n in (3, 8, 12):
+    for n in (3, 8, 11):
         osc = [0] * MAX_LAYERS
         master = 0
         clipped = 0
