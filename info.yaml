@@ -191,28 +191,59 @@ panel:
         or use it to clock something else in time with the illusion.
 
 controls:
+  switch:
+    middle:
+      name: Page 1
+      description: >
+        Speed, density and source mix. The card's normal playing page.
+    up:
+      name: Page 2
+      description: >
+        Quantise, stereo width and output level - or in HIDDEN BARBER,
+        quantise, ping decay and level. Knobs use PICKUP across a page change:
+        each holds its previous value until moved about 4 degrees, with its LED
+        pulsing until it does, so flicking pages never edits three parameters
+        at once.
+    down:
+      name: Freeze
+      description: >
+        Spring-loaded, and a button rather than a third page. Each press
+        toggles FREEZE - the stack stops moving through the envelope but keeps
+        sounding. LED 3 lights while frozen. A gate into Audio In 2 does the
+        same thing, and both resume from exactly where they paused.
   knobs:
-    - when: Switch Middle (page 1)
+    - when:
+        z: middle
       main:
         name: SPEED
         description: >
-          Glide speed and direction. Centre is stationary, with a deadzone so it
-          can be found by feel; anticlockwise descends, clockwise ascends. The
-          range is wide - about 8 seconds per octave just off centre, through a
-          clear glide at three quarters travel, to roughly 8 octaves per second
-          at the stops, which reads as a siren rather than a glissando.
+          Glide speed and direction. Centre is stationary, with a deadzone so
+          it can be found by feel; anticlockwise descends, clockwise ascends.
+          About 85% of the travel sits inside the illusion - 46 seconds per
+          octave just off centre, down to about one second at 85% - and the
+          last stretch runs out to roughly 8 octaves per second, which reads
+          as a siren rather than a glissando. A Shepard tone only works while
+          the ear cannot track the octave cycle, so the curve is weighted to
+          keep most of the knob below that limit. In HIDDEN BARBER this is
+          POLE SPEED: the same control over an invisible climb, setting how
+          far apart in pitch consecutive strikes land.
       x:
         name: DENSITY
         description: >
           Number of octave layers, 3 to 11. Higher counts make the illusion
           smoother and more convincing; lower counts leave the individual
-          octaves audible.
+          octaves audible. Stepped discretely with hysteresis, since adding a
+          layer respaces the whole stack and there is no entering layer to
+          fade. In HIDDEN BARBER it sets the layers in each strike.
       y:
         name: SOURCE
         description: >
           Crossfades from the internal sine bank (anticlockwise) to the
-          octave-stacked live input (clockwise).
-    - when: Switch Up (page 2), normal boot
+          octave-stacked live input (clockwise), at constant power. In HIDDEN
+          BARBER the live input is also gated by the ping envelope, so your
+          own signal is what rings.
+    - when:
+        z: up
       main:
         name: QUANTISE
         description: >
@@ -225,74 +256,45 @@ controls:
           symmetric and repeat BELOW the octave, which suits a barber-pole
           unusually well. Steps are even in time - the pole advances one
           degree per unit time rather than a fixed pitch interval - and are
-          slewed over about 1.4ms rather than snapped.
+          slewed over about 1.4ms rather than snapped. In HIDDEN BARBER it
+          makes strikes land on scale degrees, which is one of the most
+          playable things about that mode.
       x:
-        name: WIDTH
+        name: WIDTH / DECAY
         description: >
-          Stereo width, by offsetting the window position between channels.
-          Mono-safe at every setting.
+          In normal boot, stereo width - by offsetting the window position
+          between channels, which spreads the image without ever separating an
+          octave from its neighbours, so the stack stays fused and a mono sum
+          stays valid. In HIDDEN BARBER it is ping DECAY instead, from a 17ms
+          click to a 1.7s ring, and width sits at a fixed modest spread.
       y:
         name: LEVEL
         description: >
           Output level. Holds its current value until the knob is actually
           moved, so changing page never drops the volume.
-    - when: Switch Middle (page 1), HIDDEN BARBER alt-boot
-      main:
-        name: POLE SPEED
-        description: >
-          How fast the invisible climb moves between strikes, and which way.
-          The pole is silent here - this sets how far apart in pitch
-          consecutive pings land.
-      x:
-        name: DENSITY
-        description: 3 to 11 octave layers in each strike.
-      y:
-        name: SOURCE
-        description: >
-          Internal sines anticlockwise, your own input octave-stacked and
-          gated by the ping envelope clockwise.
-    - when: Switch Up (page 2), HIDDEN BARBER alt-boot
-      main:
-        name: QUANTISE
-        description: >
-          Smooth, 12-ET, major, minor, pentatonic, diminished or whole tone
-          - as in normal boot, so
-          strikes land on scale degrees rather than anywhere on the glide.
-          One of the most playable things about this mode.
-      x:
-        name: DECAY
-        description: >
-          How long each ping rings, from a 17ms click to a 1.7s bell. Stereo
-          width has no knob in HIDDEN BARBER and sits at a fixed modest spread.
-      y:
-        name: LEVEL
-        description: >
-          Output level. Worth having here because polyphony makes the level
-          vary between a single strike and four overlapping ones.
-
   leds:
-    - when: Normal running
-      display: list
+    - display: list
       items:
-        - id: 0
+        - id: LED0
           name: Phase (quarter 1)
-        - id: 1
-          name: Phase (quarter 2)
-        - id: 2
-          name: Phase (quarter 3)
-        - id: 3
-          name: Freeze
-          description: Lit while the stack is frozen.
-        - id: 4
-          name: Page 1
-        - id: 5
-          name: Page 2
-    - when: Boot (first half second)
-      display: list
-      items:
-        - id: 0
-          name: Boot mode
           description: >
-            LEDs 0, 2 and 4 light together for a normal boot; LEDs 1, 3 and 5
-            for the HIDDEN BARBER alt-boot. Held for about three quarters of a second
-            after the switch is read.
+            LEDs 0 to 2 show the master glide position, one lighting per
+            quarter of the octave cycle - so the pole's progress is visible
+            even when the sound gives nothing away. At boot, LEDs 0, 2 and 4
+            light together for a normal boot and 1, 3 and 5 for the HIDDEN
+            BARBER alt-boot, held for about three quarters of a second after
+            the switch is read.
+        - id: LED1
+          name: Phase (quarter 2)
+        - id: LED2
+          name: Phase (quarter 3)
+        - id: LED3
+          name: Freeze
+          description: Lit while the stack is frozen or held.
+        - id: LED4
+          name: Page 1
+          description: >
+            Lit on page 1. Pulses instead while a knob is waiting to be picked
+            up after a page change.
+        - id: LED5
+          name: Page 2
